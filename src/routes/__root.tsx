@@ -77,14 +77,20 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "Lovable App" },
-      { name: "description", content: "Lovable Generated Project" },
-      { name: "author", content: "Lovable" },
-      { property: "og:title", content: "Lovable App" },
-      { property: "og:description", content: "Lovable Generated Project" },
+      { title: "ViralDub — Traduis tes TikToks FR en anglais avec voix off" },
+      {
+        name: "description",
+        content:
+          "Upload une vidéo TikTok française, récupère-la en anglais avec voix off, sous-titres, silences coupés et transitions. 100% dans ton navigateur.",
+      },
+      { name: "author", content: "ViralDub" },
+      { property: "og:title", content: "ViralDub — TikTok FR → EN avec voix off" },
+      {
+        property: "og:description",
+        content: "Traduction, voix off IA et montage automatique de tes TikToks français.",
+      },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
-      { name: "twitter:site", content: "@Lovable" },
     ],
     links: [
       {
