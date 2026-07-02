@@ -5,9 +5,7 @@ let instance: FFmpeg | null = null;
 let loading: Promise<FFmpeg> | null = null;
 
 const CORE_VERSION = "0.12.6";
-const FFMPEG_VERSION = "0.12.10";
-const CORE_BASE = `https://unpkg.com/@ffmpeg/core@${CORE_VERSION}/dist/umd`;
-const FFMPEG_BASE = `https://unpkg.com/@ffmpeg/ffmpeg@${FFMPEG_VERSION}/dist/umd`;
+const CORE_BASE = `https://unpkg.com/@ffmpeg/core@${CORE_VERSION}/dist/esm`;
 
 export async function getFfmpeg(onLog?: (m: string) => void, onProgress?: (p: number) => void) {
   if (instance) return instance;
@@ -20,12 +18,11 @@ export async function getFfmpeg(onLog?: (m: string) => void, onProgress?: (p: nu
       console.log("[ffmpeg]", message);
     });
     if (onProgress) ff.on("progress", ({ progress }) => onProgress(Math.max(0, Math.min(1, progress))));
-    const [coreURL, wasmURL, classWorkerURL] = await Promise.all([
+    const [coreURL, wasmURL] = await Promise.all([
       toBlobURL(`${CORE_BASE}/ffmpeg-core.js`, "text/javascript"),
       toBlobURL(`${CORE_BASE}/ffmpeg-core.wasm`, "application/wasm"),
-      toBlobURL(`${FFMPEG_BASE}/814.ffmpeg.js`, "text/javascript"),
     ]);
-    await ff.load({ coreURL, wasmURL, classWorkerURL });
+    await ff.load({ coreURL, wasmURL });
     instance = ff;
     return ff;
   })();
