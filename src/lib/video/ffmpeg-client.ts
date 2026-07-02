@@ -1,5 +1,5 @@
 import { FFmpeg } from "@ffmpeg/ffmpeg";
-import { toBlobURL, fetchFile } from "@ffmpeg/util";
+import { toBlobURL } from "@ffmpeg/util";
 
 let instance: FFmpeg | null = null;
 let loading: Promise<FFmpeg> | null = null;
@@ -28,5 +28,3 @@ export async function getFfmpeg(onLog?: (m: string) => void, onProgress?: (p: nu
   })();
   return loading;
 }
-
-export { fetchFile };
