@@ -1,4 +1,4 @@
-import { getFfmpeg, fetchFile } from "./ffmpeg-client";
+import { getFfmpeg } from "./ffmpeg-client";
 import { transcribeAudio, translateSegments, synthesizeSpeech } from "@/lib/ai.functions";
 
 export type Word = { text: string; start: number; end: number };
@@ -22,6 +22,48 @@ function base64ToBytes(b64: string) {
   const out = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
   return out;
+}
+
+async function readFileBytes(file: File): Promise<Uint8Array> {
+  const attempts: Array<() => Promise<ArrayBuffer | Uint8Array>> = [
+    () => file.arrayBuffer(),
+    async () => {
+      if (!file.stream) throw new Error("File streams are unavailable in this browser.");
+      const reader = file.stream().getReader();
+      const chunks: Uint8Array[] = [];
+      let total = 0;
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        chunks.push(value);
+        total += value.byteLength;
+      }
+      const out = new Uint8Array(total);
+      let offset = 0;
+      for (const chunk of chunks) {
+        out.set(chunk, offset);
+        offset += chunk.byteLength;
+      }
+      return out;
+    },
+    () => new Response(file).arrayBuffer(),
+  ];
+
+  let lastError: unknown;
+  for (const attempt of attempts) {
+    try {
+      const data = await attempt();
+      return data instanceof Uint8Array ? data : new Uint8Array(data);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw new Error(
+    `Impossible de lire cette vidéo depuis le sélecteur de fichiers. Copie-la d’abord dans la mémoire locale de l’appareil, puis réessaie. ${
+      lastError instanceof Error ? lastError.message : ""
+    }`.trim(),
+  );
 }
 
 /** Group words into sentence-ish segments (~4-8s or on strong punctuation). */
@@ -108,15 +150,9 @@ export async function runPipeline(
 
   const inputName = "input.mp4";
   progress("upload", "Import du fichier…");
-  // Read via arrayBuffer() (streams even large mobile-picked files) instead of
-  // @ffmpeg/util's fetchFile, which uses FileReader and fails with "Code=-1"
-  // on some mobile browsers when the file comes from a content:// URI.
-  let inputBytes: Uint8Array;
-  try {
-    inputBytes = new Uint8Array(await file.arrayBuffer());
-  } catch {
-    inputBytes = await fetchFile(file);
-  }
+  // Do not use @ffmpeg/util's fetchFile here: it falls back to FileReader and
+  // can fail with "File could not be read! Code=-1" on mobile-picked videos.
+  const inputBytes = await readFileBytes(file);
   await ff.writeFile(inputName, inputBytes);
 
   // 1. Extract mono 16k WAV audio for transcription + silence detection
