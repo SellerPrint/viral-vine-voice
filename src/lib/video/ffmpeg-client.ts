@@ -5,19 +5,27 @@ let instance: FFmpeg | null = null;
 let loading: Promise<FFmpeg> | null = null;
 
 const CORE_VERSION = "0.12.6";
-const BASE = `https://unpkg.com/@ffmpeg/core@${CORE_VERSION}/dist/umd`;
+const FFMPEG_VERSION = "0.12.10";
+const CORE_BASE = `https://unpkg.com/@ffmpeg/core@${CORE_VERSION}/dist/umd`;
+const FFMPEG_BASE = `https://unpkg.com/@ffmpeg/ffmpeg@${FFMPEG_VERSION}/dist/umd`;
 
 export async function getFfmpeg(onLog?: (m: string) => void, onProgress?: (p: number) => void) {
   if (instance) return instance;
   if (loading) return loading;
   loading = (async () => {
     const ff = new FFmpeg();
-    if (onLog) ff.on("log", ({ message }) => onLog(message));
-    if (onProgress) ff.on("progress", ({ progress }) => onProgress(Math.max(0, Math.min(1, progress))));
-    await ff.load({
-      coreURL: await toBlobURL(`${BASE}/ffmpeg-core.js`, "text/javascript"),
-      wasmURL: await toBlobURL(`${BASE}/ffmpeg-core.wasm`, "application/wasm"),
+    ff.on("log", ({ message }) => {
+      if (onLog) onLog(message);
+      // eslint-disable-next-line no-console
+      console.log("[ffmpeg]", message);
     });
+    if (onProgress) ff.on("progress", ({ progress }) => onProgress(Math.max(0, Math.min(1, progress))));
+    const [coreURL, wasmURL, classWorkerURL] = await Promise.all([
+      toBlobURL(`${CORE_BASE}/ffmpeg-core.js`, "text/javascript"),
+      toBlobURL(`${CORE_BASE}/ffmpeg-core.wasm`, "application/wasm"),
+      toBlobURL(`${FFMPEG_BASE}/814.ffmpeg.js`, "text/javascript"),
+    ]);
+    await ff.load({ coreURL, wasmURL, classWorkerURL });
     instance = ff;
     return ff;
   })();
