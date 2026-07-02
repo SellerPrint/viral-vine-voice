@@ -108,7 +108,16 @@ export async function runPipeline(
 
   const inputName = "input.mp4";
   progress("upload", "Import du fichier…");
-  await ff.writeFile(inputName, await fetchFile(file));
+  // Read via arrayBuffer() (streams even large mobile-picked files) instead of
+  // @ffmpeg/util's fetchFile, which uses FileReader and fails with "Code=-1"
+  // on some mobile browsers when the file comes from a content:// URI.
+  let inputBytes: Uint8Array;
+  try {
+    inputBytes = new Uint8Array(await file.arrayBuffer());
+  } catch {
+    inputBytes = await fetchFile(file);
+  }
+  await ff.writeFile(inputName, inputBytes);
 
   // 1. Extract mono 16k WAV audio for transcription + silence detection
   progress("extract", "Extraction de la piste audio…");
