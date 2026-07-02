@@ -18,12 +18,11 @@ export async function getFfmpeg(onLog?: (m: string) => void, onProgress?: (p: nu
       console.log("[ffmpeg]", message);
     });
     if (onProgress) ff.on("progress", ({ progress }) => onProgress(Math.max(0, Math.min(1, progress))));
-    const [coreURL, wasmURL, classWorkerURL] = await Promise.all([
+    const [coreURL, wasmURL] = await Promise.all([
       toBlobURL(`${CORE_BASE}/ffmpeg-core.js`, "text/javascript"),
       toBlobURL(`${CORE_BASE}/ffmpeg-core.wasm`, "application/wasm"),
-      toBlobURL(`${FFMPEG_BASE}/814.ffmpeg.js`, "text/javascript"),
     ]);
-    await ff.load({ coreURL, wasmURL, classWorkerURL });
+    await ff.load({ coreURL, wasmURL });
     instance = ff;
     return ff;
   })();
