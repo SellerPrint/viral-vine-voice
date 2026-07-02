@@ -5,9 +5,7 @@ let instance: FFmpeg | null = null;
 let loading: Promise<FFmpeg> | null = null;
 
 const CORE_VERSION = "0.12.6";
-const FFMPEG_VERSION = "0.12.10";
-const CORE_BASE = `https://unpkg.com/@ffmpeg/core@${CORE_VERSION}/dist/umd`;
-const FFMPEG_BASE = `https://unpkg.com/@ffmpeg/ffmpeg@${FFMPEG_VERSION}/dist/umd`;
+const CORE_BASE = `https://unpkg.com/@ffmpeg/core@${CORE_VERSION}/dist/esm`;
 
 export async function getFfmpeg(onLog?: (m: string) => void, onProgress?: (p: number) => void) {
   if (instance) return instance;
