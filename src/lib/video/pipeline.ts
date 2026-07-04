@@ -272,13 +272,37 @@ export async function runPipeline(
   const esc = (s: string) =>
     s.replace(/\\/g, "\\\\").replace(/:/g, "\\:").replace(/'/g, "\u2019").replace(/%/g, "\\%");
 
+  // Wrap long lines so subtitles stay fully on screen (portrait 9:16).
+  const wrapText = (raw: string, maxChars = 22, maxLines = 3) => {
+    const words = raw.split(/\s+/);
+    const lines: string[] = [];
+    let cur = "";
+    for (const w of words) {
+      if (!cur.length) {
+        cur = w;
+      } else if ((cur + " " + w).length <= maxChars) {
+        cur += " " + w;
+      } else {
+        if (lines.length === maxLines - 1) {
+          cur += " " + w;
+        } else {
+          lines.push(cur);
+          cur = w;
+        }
+      }
+    }
+    if (cur.length) lines.push(cur);
+    return lines.join("\n");
+  };
+
   const drawTextFilters = segments
     .filter((s) => s.textEn.trim())
     .map((s) => {
-      const text = esc(s.textEn.toUpperCase());
+      const wrapped = wrapText(s.textEn.toUpperCase());
+      const text = esc(wrapped);
       const start = s.start.toFixed(3);
       const end = s.end.toFixed(3);
-      return `drawtext=fontfile=/tmp/font.ttf:text='${text}':fontcolor=white:fontsize=42:box=1:boxcolor=black@0.55:boxborderw=14:x=(w-tw)/2:y=h-th-h*0.08:enable='between(t,${start},${end})'`;
+      return `drawtext=fontfile=/tmp/font.ttf:text='${text}':fontcolor=white:fontsize=26:line_spacing=6:box=1:boxcolor=black@0.6:boxborderw=10:x=(w-text_w)/2:y=h*0.62-text_h/2:enable='between(t,${start},${end})'`;
     })
     .join(",");
 
@@ -296,9 +320,24 @@ export async function runPipeline(
     : new Uint8Array(await fontRes.arrayBuffer());
   await ff.writeFile("/tmp/font.ttf", ttfBuf);
 
+  // Masks to hide burned-in FR subtitles and platform logos/watermarks.
+  // Filled black rectangles are reliable across ffmpeg.wasm; blurring regions
+  // would need a split/overlay graph that ffmpeg.wasm handles poorly.
+  const maskFilters = [
+    // Bottom caption strip (TikTok/CapCut subtitles + username + music info)
+    `drawbox=x=0:y=ih*0.66:w=iw:h=ih*0.28:color=black@0.85:t=fill`,
+    // Mid-lower zone where "hook" captions sometimes sit
+    `drawbox=x=0:y=ih*0.54:w=iw:h=ih*0.10:color=black@0.75:t=fill`,
+    // Top strip (title, "POV", header captions, TikTok/IG top bar)
+    `drawbox=x=0:y=0:w=iw:h=ih*0.09:color=black@0.85:t=fill`,
+    // Top-right watermark / logo box
+    `drawbox=x=iw*0.70:y=ih*0.02:w=iw*0.28:h=ih*0.09:color=black@0.85:t=fill`,
+    // Top-left watermark / logo box
+    `drawbox=x=0:y=ih*0.02:w=iw*0.28:h=ih*0.09:color=black@0.85:t=fill`,
+  ].join(",");
+
   const videoFilter = [
-    // hide typical FR subtitle strip near bottom
-    `drawbox=x=0:y=ih*0.78:w=iw:h=ih*0.12:color=black:t=fill`,
+    maskFilters,
     drawTextFilters,
     // silence-cut via setpts (needs select)
     `select='${keepExpr}',setpts=N/FRAME_RATE/TB`,
