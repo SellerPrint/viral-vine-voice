@@ -25,6 +25,8 @@ function base64ToBytes(b64: string) {
   return out;
 }
 
+const wait = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
+
 export async function readFileBytes(file: File): Promise<Uint8Array> {
   const attempts: Array<() => Promise<ArrayBuffer | Uint8Array>> = [
     () => file.arrayBuffer(),
@@ -50,13 +52,16 @@ export async function readFileBytes(file: File): Promise<Uint8Array> {
   ];
 
   let lastError: unknown;
-  for (const attempt of attempts) {
-    try {
-      const data = await attempt();
-      return data instanceof Uint8Array ? data : new Uint8Array(data);
-    } catch (error) {
-      lastError = error;
+  for (let round = 0; round < 4; round++) {
+    for (const attempt of attempts) {
+      try {
+        const data = await attempt();
+        return data instanceof Uint8Array ? data : new Uint8Array(data);
+      } catch (error) {
+        lastError = error;
+      }
     }
+    await wait(250 * (round + 1));
   }
 
   throw new Error(

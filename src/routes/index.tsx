@@ -70,7 +70,7 @@ function Home() {
     setOutput(null);
     setPct(0);
     try {
-    const res = await runPipeline({ name: file.name, bytes: file.bytes }, (s, d, p) => {
+      const res = await runPipeline({ name: file.name, bytes: file.bytes }, (s, d, p) => {
         setStep(s as StepKey);
         if (d !== undefined) setDetail(d);
         if (p !== undefined) setPct(p);
@@ -140,10 +140,10 @@ function Home() {
               <>
                 <div
                   onDragOver={(e) => e.preventDefault()}
-                    onDrop={(e) => {
+                  onDrop={(e) => {
                     e.preventDefault();
                     if (running) return;
-                      void handleFile(e.dataTransfer.files?.[0] ?? null);
+                    void handleFile(e.dataTransfer.files?.[0] ?? null);
                   }}
                   className={`relative flex min-h-[220px] flex-col items-center justify-center rounded-2xl border-2 border-dashed p-8 text-center transition ${
                     file ? "border-accent/60 bg-accent/5" : "border-border hover:border-primary/60"
