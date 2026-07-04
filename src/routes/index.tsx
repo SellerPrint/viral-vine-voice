@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useCallback, useRef, useState } from "react";
-import { runPipeline, type Segment } from "@/lib/video/pipeline";
+import { readFileBytes, runPipeline, type Segment, type VideoInput } from "@/lib/video/pipeline";
 
 export const Route = createFileRoute("/")({
   component: Home,
@@ -29,15 +29,16 @@ const STEPS: { key: StepKey; label: string }[] = [
 ];
 
 function Home() {
-  const [file, setFile] = useState<File | null>(null);
+  const [file, setFile] = useState<(VideoInput & { size: number }) | null>(null);
   const [step, setStep] = useState<StepKey>("idle");
   const [detail, setDetail] = useState("");
   const [pct, setPct] = useState(0);
   const [output, setOutput] = useState<{ url: string; segments: Segment[] } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [copying, setCopying] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
 
-  const handleFile = (f: File | null) => {
+  const handleFile = async (f: File | null) => {
     setError(null);
     setOutput(null);
     if (!f) return setFile(null);
@@ -49,7 +50,18 @@ function Home() {
       setError("Fichier trop lourd. Maximum 60 Mo (limite du traitement navigateur).");
       return;
     }
-    setFile(f);
+    setCopying(true);
+    setDetail("Copie locale de la vidéo…");
+    try {
+      const bytes = await readFileBytes(f);
+      setFile({ name: f.name, size: f.size, bytes });
+    } catch (e) {
+      setFile(null);
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setCopying(false);
+      setDetail("");
+    }
   };
 
   const start = useCallback(async () => {
@@ -58,7 +70,7 @@ function Home() {
     setOutput(null);
     setPct(0);
     try {
-      const res = await runPipeline(file, (s, d, p) => {
+      const res = await runPipeline({ name: file.name, bytes: file.bytes }, (s, d, p) => {
         setStep(s as StepKey);
         if (d !== undefined) setDetail(d);
         if (p !== undefined) setPct(p);
@@ -82,11 +94,12 @@ function Home() {
     setDetail("");
     setPct(0);
     setError(null);
+    setCopying(false);
     if (inputRef.current) inputRef.current.value = "";
   };
 
   const currentStepIdx = STEPS.findIndex((s) => s.key === step);
-  const running = step !== "idle" && step !== "done" && step !== "error";
+  const running = copying || (step !== "idle" && step !== "done" && step !== "error");
 
   return (
     <div className="mesh-bg min-h-screen">
@@ -130,7 +143,7 @@ function Home() {
                   onDrop={(e) => {
                     e.preventDefault();
                     if (running) return;
-                    handleFile(e.dataTransfer.files?.[0] ?? null);
+                    void handleFile(e.dataTransfer.files?.[0] ?? null);
                   }}
                   className={`relative flex min-h-[220px] flex-col items-center justify-center rounded-2xl border-2 border-dashed p-8 text-center transition ${
                     file ? "border-accent/60 bg-accent/5" : "border-border hover:border-primary/60"
@@ -141,11 +154,19 @@ function Home() {
                     type="file"
                     accept="video/*"
                     disabled={running}
-                    onChange={(e) => handleFile(e.target.files?.[0] ?? null)}
+                    onChange={(e) => void handleFile(e.target.files?.[0] ?? null)}
                     className="absolute inset-0 cursor-pointer opacity-0"
                     aria-label="Importer une vidéo"
                   />
-                  {!file ? (
+                  {copying ? (
+                    <>
+                      <div className="bg-grad-brand mx-auto grid h-14 w-14 place-items-center rounded-2xl text-2xl text-black">
+                        …
+                      </div>
+                      <p className="mt-4 font-display text-xl font-semibold">Copie de la vidéo…</p>
+                      <p className="mt-1 text-sm text-muted-foreground">Garde cette page ouverte.</p>
+                    </>
+                  ) : !file ? (
                     <>
                       <div className="bg-grad-brand mx-auto grid h-14 w-14 place-items-center rounded-2xl text-2xl text-black">
                         ↑

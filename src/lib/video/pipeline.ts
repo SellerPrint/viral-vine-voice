@@ -3,6 +3,7 @@ import { transcribeAudio, translateSegments, synthesizeSpeech } from "@/lib/ai.f
 
 export type Word = { text: string; start: number; end: number };
 export type Segment = { start: number; end: number; textFr: string; textEn: string };
+export type VideoInput = { name: string; bytes: Uint8Array };
 
 export type ProgressCb = (step: string, detail?: string, pct?: number) => void;
 
@@ -24,7 +25,9 @@ function base64ToBytes(b64: string) {
   return out;
 }
 
-async function readFileBytes(file: File): Promise<Uint8Array> {
+const wait = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
+
+export async function readFileBytes(file: File): Promise<Uint8Array> {
   const attempts: Array<() => Promise<ArrayBuffer | Uint8Array>> = [
     () => file.arrayBuffer(),
     async () => {
@@ -46,21 +49,23 @@ async function readFileBytes(file: File): Promise<Uint8Array> {
       }
       return out;
     },
-    () => new Response(file).arrayBuffer(),
   ];
 
   let lastError: unknown;
-  for (const attempt of attempts) {
-    try {
-      const data = await attempt();
-      return data instanceof Uint8Array ? data : new Uint8Array(data);
-    } catch (error) {
-      lastError = error;
+  for (let round = 0; round < 4; round++) {
+    for (const attempt of attempts) {
+      try {
+        const data = await attempt();
+        return data instanceof Uint8Array ? data : new Uint8Array(data);
+      } catch (error) {
+        lastError = error;
+      }
     }
+    await wait(250 * (round + 1));
   }
 
   throw new Error(
-    `Impossible de lire cette vidéo depuis le sélecteur de fichiers. Copie-la d’abord dans la mémoire locale de l’appareil, puis réessaie. ${
+    `Impossible de copier cette vidéo depuis le sélecteur de fichiers. Ouvre-la depuis la galerie locale de l’appareil ou télécharge-la d’abord, puis réessaie. ${
       lastError instanceof Error ? lastError.message : ""
     }`.trim(),
   );
@@ -142,7 +147,7 @@ export function keptIntervals(
 /* --------------------------------- MAIN --------------------------------- */
 
 export async function runPipeline(
-  file: File,
+  input: VideoInput,
   progress: ProgressCb,
 ): Promise<{ videoBlob: Blob; segments: Segment[] }> {
   progress("ffmpeg", "Chargement du moteur vidéo (~30 Mo)…");
@@ -150,10 +155,7 @@ export async function runPipeline(
 
   const inputName = "input.mp4";
   progress("upload", "Import du fichier…");
-  // Do not use @ffmpeg/util's fetchFile here: it falls back to FileReader and
-  // can fail with "File could not be read! Code=-1" on mobile-picked videos.
-  const inputBytes = await readFileBytes(file);
-  await ff.writeFile(inputName, inputBytes);
+  await ff.writeFile(inputName, input.bytes);
 
   // 1. Extract mono 16k WAV audio for transcription + silence detection
   progress("extract", "Extraction de la piste audio…");
