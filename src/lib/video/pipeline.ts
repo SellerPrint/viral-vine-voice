@@ -272,13 +272,37 @@ export async function runPipeline(
   const esc = (s: string) =>
     s.replace(/\\/g, "\\\\").replace(/:/g, "\\:").replace(/'/g, "\u2019").replace(/%/g, "\\%");
 
+  // Wrap long lines so subtitles stay fully on screen (portrait 9:16).
+  const wrapText = (raw: string, maxChars = 22, maxLines = 3) => {
+    const words = raw.split(/\s+/);
+    const lines: string[] = [];
+    let cur = "";
+    for (const w of words) {
+      if (!cur.length) {
+        cur = w;
+      } else if ((cur + " " + w).length <= maxChars) {
+        cur += " " + w;
+      } else {
+        if (lines.length === maxLines - 1) {
+          cur += " " + w;
+        } else {
+          lines.push(cur);
+          cur = w;
+        }
+      }
+    }
+    if (cur.length) lines.push(cur);
+    return lines.join("\n");
+  };
+
   const drawTextFilters = segments
     .filter((s) => s.textEn.trim())
     .map((s) => {
-      const text = esc(s.textEn.toUpperCase());
+      const wrapped = wrapText(s.textEn.toUpperCase());
+      const text = esc(wrapped);
       const start = s.start.toFixed(3);
       const end = s.end.toFixed(3);
-      return `drawtext=fontfile=/tmp/font.ttf:text='${text}':fontcolor=white:fontsize=42:box=1:boxcolor=black@0.55:boxborderw=14:x=(w-tw)/2:y=h-th-h*0.08:enable='between(t,${start},${end})'`;
+      return `drawtext=fontfile=/tmp/font.ttf:text='${text}':fontcolor=white:fontsize=26:line_spacing=6:box=1:boxcolor=black@0.6:boxborderw=10:x=(w-text_w)/2:y=h-text_h-h*0.22:enable='between(t,${start},${end})'`;
     })
     .join(",");
 
