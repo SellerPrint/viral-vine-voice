@@ -320,9 +320,22 @@ export async function runPipeline(
     : new Uint8Array(await fontRes.arrayBuffer());
   await ff.writeFile("/tmp/font.ttf", ttfBuf);
 
-  const videoFilter = [
-    // hide typical FR subtitle strip near bottom
-    `drawbox=x=0:y=ih*0.78:w=iw:h=ih*0.12:color=black:t=fill`,
+  // Masks: cover typical burned-in FR subtitles + platform watermarks/logos.
+  // We use a strong Gaussian blur on the source regions so the mask blends with
+  // the background instead of leaving a hard black rectangle.
+  const masks = [
+    // Bottom caption strip (TikTok / CapCut style subtitles + music bar)
+    `split=6[base][mBot][mMid][mTop][mLogoTR][mLogoTL];` +
+      `[mBot]crop=iw:ih*0.28:0:ih*0.68,boxblur=30:2[bBot];` +
+      `[mMid]crop=iw:ih*0.14:0:ih*0.55,boxblur=30:2[bMid];` +
+      `[mTop]crop=iw:ih*0.10:0:0,boxblur=30:2[bTop];` +
+      `[mLogoTR]crop=iw*0.28:ih*0.09:iw*0.72:ih*0.02,boxblur=28:2[bLogoTR];` +
+      `[mLogoTL]crop=iw*0.28:ih*0.09:0:ih*0.02,boxblur=28:2[bLogoTL];` +
+      `[base][bBot]overlay=0:H*0.68[o1];` +
+      `[o1][bMid]overlay=0:H*0.55[o2];` +
+      `[o2][bTop]overlay=0:0[o3];` +
+      `[o3][bLogoTR]overlay=W*0.72:H*0.02[o4];` +
+      `[o4][bLogoTL]overlay=0:H*0.02`,
     drawTextFilters,
     // silence-cut via setpts (needs select)
     `select='${keepExpr}',setpts=N/FRAME_RATE/TB`,
