@@ -302,7 +302,7 @@ export async function runPipeline(
       const text = esc(wrapped);
       const start = s.start.toFixed(3);
       const end = s.end.toFixed(3);
-      return `drawtext=fontfile=/tmp/font.ttf:text='${text}':fontcolor=white:fontsize=26:line_spacing=6:box=1:boxcolor=black@0.6:boxborderw=10:x=(w-text_w)/2:y=h-text_h-h*0.22:enable='between(t,${start},${end})'`;
+      return `drawtext=fontfile=/tmp/font.ttf:text='${text}':fontcolor=white:fontsize=26:line_spacing=6:box=1:boxcolor=black@0.6:boxborderw=10:x=(w-text_w)/2:y=h*0.62-text_h/2:enable='between(t,${start},${end})'`;
     })
     .join(",");
 
