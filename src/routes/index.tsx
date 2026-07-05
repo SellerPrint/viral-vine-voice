@@ -44,6 +44,9 @@ function Home() {
   const [output, setOutput] = useState<{ url: string; segments: Segment[] } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copying, setCopying] = useState(false);
+  const [preset, setPreset] = useState<SubtitlePreset>(SUBTITLE_PRESETS[0]);
+  const [overrides, setOverrides] = useState<SubtitleOverrides>({});
+  const [masks, setMasks] = useState<MaskZone[]>(DEFAULT_MASKS);
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   const handleFile = async (f: File | null) => {
