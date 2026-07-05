@@ -155,7 +155,10 @@ export function keptIntervals(
 export async function runPipeline(
   input: VideoInput,
   progress: ProgressCb,
+  opts?: PipelineOptions,
 ): Promise<{ videoBlob: Blob; segments: Segment[] }> {
+  const preset = resolvePreset(opts?.preset ?? SUBTITLE_PRESETS[0], opts?.overrides ?? {});
+  const masks = opts?.masks ?? DEFAULT_MASKS;
   progress("ffmpeg", "Chargement du moteur vidéo (~30 Mo)…");
   const ff = await getFfmpeg(undefined, (p) => progress("ffmpeg-progress", undefined, p));
 
