@@ -81,11 +81,15 @@ function Home() {
     setOutput(null);
     setPct(0);
     try {
-      const res = await runPipeline({ name: file.name, bytes: file.bytes }, (s, d, p) => {
-        setStep(s as StepKey);
-        if (d !== undefined) setDetail(d);
-        if (p !== undefined) setPct(p);
-      });
+      const res = await runPipeline(
+        { name: file.name, bytes: file.bytes },
+        (s, d, p) => {
+          setStep(s as StepKey);
+          if (d !== undefined) setDetail(d);
+          if (p !== undefined) setPct(p);
+        },
+        { preset, overrides, masks },
+      );
       const url = URL.createObjectURL(res.videoBlob);
       setOutput({ url, segments: res.segments });
       setStep("done");
