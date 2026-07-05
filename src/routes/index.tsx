@@ -203,6 +203,22 @@ function Home() {
                   )}
                 </div>
 
+                {file && !running && (
+                  <SettingsPanel
+                    file={file}
+                    preset={preset}
+                    overrides={overrides}
+                    masks={masks}
+                    onChange={(v) => {
+                      setPreset(v.preset);
+                      setOverrides(v.overrides);
+                      setMasks(v.masks);
+                    }}
+                  />
+                )}
+
+
+
                 <div className="mt-6 flex flex-wrap items-center gap-3">
                   <button
                     onClick={start}
