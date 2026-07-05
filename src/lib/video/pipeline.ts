@@ -1,5 +1,11 @@
 import { getFfmpeg } from "./ffmpeg-client";
 import { transcribeAudio, translateSegments, synthesizeSpeech } from "@/lib/ai.functions";
+import {
+  DEFAULT_MASKS,
+  SUBTITLE_PRESETS,
+  resolvePreset,
+  type PipelineOptions,
+} from "./presets";
 
 export type Word = { text: string; start: number; end: number };
 export type Segment = { start: number; end: number; textFr: string; textEn: string };
