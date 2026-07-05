@@ -1,6 +1,14 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useCallback, useRef, useState } from "react";
 import { readFileBytes, runPipeline, type Segment, type VideoInput } from "@/lib/video/pipeline";
+import {
+  DEFAULT_MASKS,
+  SUBTITLE_PRESETS,
+  type MaskZone,
+  type SubtitleOverrides,
+  type SubtitlePreset,
+} from "@/lib/video/presets";
+import { SettingsPanel } from "@/components/SettingsPanel";
 
 export const Route = createFileRoute("/")({
   component: Home,
