@@ -1,6 +1,14 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useCallback, useRef, useState } from "react";
 import { readFileBytes, runPipeline, type Segment, type VideoInput } from "@/lib/video/pipeline";
+import {
+  DEFAULT_MASKS,
+  SUBTITLE_PRESETS,
+  type MaskZone,
+  type SubtitleOverrides,
+  type SubtitlePreset,
+} from "@/lib/video/presets";
+import { SettingsPanel } from "@/components/SettingsPanel";
 
 export const Route = createFileRoute("/")({
   component: Home,
@@ -36,6 +44,9 @@ function Home() {
   const [output, setOutput] = useState<{ url: string; segments: Segment[] } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copying, setCopying] = useState(false);
+  const [preset, setPreset] = useState<SubtitlePreset>(SUBTITLE_PRESETS[0]);
+  const [overrides, setOverrides] = useState<SubtitleOverrides>({});
+  const [masks, setMasks] = useState<MaskZone[]>(DEFAULT_MASKS);
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   const handleFile = async (f: File | null) => {
@@ -70,11 +81,15 @@ function Home() {
     setOutput(null);
     setPct(0);
     try {
-      const res = await runPipeline({ name: file.name, bytes: file.bytes }, (s, d, p) => {
-        setStep(s as StepKey);
-        if (d !== undefined) setDetail(d);
-        if (p !== undefined) setPct(p);
-      });
+      const res = await runPipeline(
+        { name: file.name, bytes: file.bytes },
+        (s, d, p) => {
+          setStep(s as StepKey);
+          if (d !== undefined) setDetail(d);
+          if (p !== undefined) setPct(p);
+        },
+        { preset, overrides, masks },
+      );
       const url = URL.createObjectURL(res.videoBlob);
       setOutput({ url, segments: res.segments });
       setStep("done");
@@ -84,7 +99,7 @@ function Home() {
       setError(e instanceof Error ? e.message : String(e));
       setStep("error");
     }
-  }, [file]);
+  }, [file, preset, overrides, masks]);
 
   const reset = () => {
     if (output) URL.revokeObjectURL(output.url);
@@ -187,6 +202,22 @@ function Home() {
                     </>
                   )}
                 </div>
+
+                {file && !running && (
+                  <SettingsPanel
+                    file={file}
+                    preset={preset}
+                    overrides={overrides}
+                    masks={masks}
+                    onChange={(v) => {
+                      setPreset(v.preset);
+                      setOverrides(v.overrides);
+                      setMasks(v.masks);
+                    }}
+                  />
+                )}
+
+
 
                 <div className="mt-6 flex flex-wrap items-center gap-3">
                   <button

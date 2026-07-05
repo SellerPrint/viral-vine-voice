@@ -1,5 +1,11 @@
 import { getFfmpeg } from "./ffmpeg-client";
 import { transcribeAudio, translateSegments, synthesizeSpeech } from "@/lib/ai.functions";
+import {
+  DEFAULT_MASKS,
+  SUBTITLE_PRESETS,
+  resolvePreset,
+  type PipelineOptions,
+} from "./presets";
 
 export type Word = { text: string; start: number; end: number };
 export type Segment = { start: number; end: number; textFr: string; textEn: string };
@@ -149,7 +155,10 @@ export function keptIntervals(
 export async function runPipeline(
   input: VideoInput,
   progress: ProgressCb,
+  opts?: PipelineOptions,
 ): Promise<{ videoBlob: Blob; segments: Segment[] }> {
+  const preset = resolvePreset(opts?.preset ?? SUBTITLE_PRESETS[0], opts?.overrides ?? {});
+  const masks = opts?.masks ?? DEFAULT_MASKS;
   progress("ffmpeg", "Chargement du moteur vidéo (~30 Mo)…");
   const ff = await getFfmpeg(undefined, (p) => progress("ffmpeg-progress", undefined, p));
 
@@ -273,7 +282,7 @@ export async function runPipeline(
     s.replace(/\\/g, "\\\\").replace(/:/g, "\\:").replace(/'/g, "\u2019").replace(/%/g, "\\%");
 
   // Wrap long lines so subtitles stay fully on screen (portrait 9:16).
-  const wrapText = (raw: string, maxChars = 22, maxLines = 3) => {
+  const wrapText = (raw: string, maxChars: number, maxLines: number) => {
     const words = raw.split(/\s+/);
     const lines: string[] = [];
     let cur = "";
@@ -298,11 +307,13 @@ export async function runPipeline(
   const drawTextFilters = segments
     .filter((s) => s.textEn.trim())
     .map((s) => {
-      const wrapped = wrapText(s.textEn.toUpperCase());
+      const raw = preset.uppercase ? s.textEn.toUpperCase() : s.textEn;
+      const wrapped = wrapText(raw, preset.maxCharsPerLine, preset.maxLines);
       const text = esc(wrapped);
       const start = s.start.toFixed(3);
       const end = s.end.toFixed(3);
-      return `drawtext=fontfile=/tmp/font.ttf:text='${text}':fontcolor=white:fontsize=26:line_spacing=6:box=1:boxcolor=black@0.6:boxborderw=10:x=(w-text_w)/2:y=h*0.62-text_h/2:enable='between(t,${start},${end})'`;
+      // yAnchor is the vertical center of the text block in the frame (0..1)
+      return `drawtext=fontfile=/tmp/font.ttf:text='${text}':fontcolor=${preset.fontColor}:fontsize=${preset.fontsize}:line_spacing=${preset.lineSpacing}:box=1:boxcolor=${preset.boxColor}:boxborderw=${preset.boxBorderW}:x=(w-text_w)/2:y=h*${preset.yAnchor.toFixed(3)}-text_h/2:enable='between(t,${start},${end})'`;
     })
     .join(",");
 
@@ -311,7 +322,6 @@ export async function runPipeline(
   const fontRes = await fetch(
     "https://unpkg.com/@fontsource/space-grotesk@5.2.10/files/space-grotesk-latin-700-normal.woff2",
   );
-  // ffmpeg drawtext needs TTF, not woff2. Grab a TTF from another CDN:
   const ttfRes = await fetch(
     "https://raw.githubusercontent.com/googlefonts/roboto/main/src/hinted/Roboto-Bold.ttf",
   );
@@ -320,26 +330,25 @@ export async function runPipeline(
     : new Uint8Array(await fontRes.arrayBuffer());
   await ff.writeFile("/tmp/font.ttf", ttfBuf);
 
-  // Masks to hide burned-in FR subtitles and platform logos/watermarks.
-  // Filled black rectangles are reliable across ffmpeg.wasm; blurring regions
-  // would need a split/overlay graph that ffmpeg.wasm handles poorly.
-  const maskFilters = [
-    // Bottom caption strip (TikTok/CapCut subtitles + username + music info)
-    `drawbox=x=0:y=ih*0.66:w=iw:h=ih*0.28:color=black@0.85:t=fill`,
-    // Mid-lower zone where "hook" captions sometimes sit
-    `drawbox=x=0:y=ih*0.54:w=iw:h=ih*0.10:color=black@0.75:t=fill`,
-    // Top strip (title, "POV", header captions, TikTok/IG top bar)
-    `drawbox=x=0:y=0:w=iw:h=ih*0.09:color=black@0.85:t=fill`,
-    // Top-right watermark / logo box
-    `drawbox=x=iw*0.70:y=ih*0.02:w=iw*0.28:h=ih*0.09:color=black@0.85:t=fill`,
-    // Top-left watermark / logo box
-    `drawbox=x=0:y=ih*0.02:w=iw*0.28:h=ih*0.09:color=black@0.85:t=fill`,
-  ].join(",");
+  // Mask burned-in FR subtitles / logos with `delogo` (subtle blur / interpolation
+  // from surrounding pixels). Much less intrusive than solid black boxes and
+  // the new EN subtitles are drawn on top so the previous caption band is
+  // fully covered even if the blur remains faintly visible.
+  const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
+  const enabledMasks = masks.filter((m) => m.enabled && m.w > 0.01 && m.h > 0.01);
+  const maskFilters = enabledMasks
+    .map((m) => {
+      const x = clamp(m.x, 0.001, 0.98);
+      const y = clamp(m.y, 0.001, 0.98);
+      const w = clamp(m.w, 0.01, 1 - x - 0.002);
+      const h = clamp(m.h, 0.01, 1 - y - 0.002);
+      return `delogo=x=iw*${x.toFixed(3)}:y=ih*${y.toFixed(3)}:w=iw*${w.toFixed(3)}:h=ih*${h.toFixed(3)}:show=0`;
+    })
+    .join(",");
 
   const videoFilter = [
     maskFilters,
     drawTextFilters,
-    // silence-cut via setpts (needs select)
     `select='${keepExpr}',setpts=N/FRAME_RATE/TB`,
   ]
     .filter(Boolean)
