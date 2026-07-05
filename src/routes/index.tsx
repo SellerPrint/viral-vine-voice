@@ -99,7 +99,7 @@ function Home() {
       setError(e instanceof Error ? e.message : String(e));
       setStep("error");
     }
-  }, [file]);
+  }, [file, preset, overrides, masks]);
 
   const reset = () => {
     if (output) URL.revokeObjectURL(output.url);
