@@ -18,15 +18,20 @@ type Props = {
 
 export function SettingsPanel({ file, preset, overrides, masks, onChange }: Props) {
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
+  const [videoBlob, setVideoBlob] = useState<Blob | null>(null);
   const [dims, setDims] = useState<{ w: number; h: number } | null>(null);
   const [detecting, setDetecting] = useState(false);
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
   useEffect(() => {
-    const blob = new Blob([file.bytes.buffer.slice(0) as ArrayBuffer], { type: "video/mp4" });
+    const blob = new Blob([file.bytes], { type: "video/mp4" });
     const url = URL.createObjectURL(blob);
+    setVideoBlob(blob);
     setVideoUrl(url);
-    return () => URL.revokeObjectURL(url);
+    return () => {
+      setVideoBlob(null);
+      URL.revokeObjectURL(url);
+    };
   }, [file]);
 
   const update = (patch: Partial<{ preset: SubtitlePreset; overrides: SubtitleOverrides; masks: MaskZone[] }>) =>
@@ -35,12 +40,10 @@ export function SettingsPanel({ file, preset, overrides, masks, onChange }: Prop
   const effective = { ...preset, ...overrides };
 
   const autoDetect = async () => {
-    if (!videoUrl) return;
+    if (!videoBlob) return;
     setDetecting(true);
     try {
-      const res = await fetch(videoUrl);
-      const blob = await res.blob();
-      const zones = await detectMaskZones(blob);
+      const zones = await detectMaskZones(videoBlob);
       // merge with existing (keep ids order of DEFAULT_MASKS)
       const merged: MaskZone[] = DEFAULT_MASKS.map((d) => {
         const found = zones.find((z) => z.id === d.id);

@@ -25,6 +25,24 @@ export async function getFfmpeg(onLog?: (m: string) => void, onProgress?: (p: nu
     await ff.load({ coreURL, wasmURL });
     instance = ff;
     return ff;
-  })();
+  })().catch((error) => {
+    loading = null;
+    instance = null;
+    throw error;
+  });
   return loading;
+}
+
+export function releaseFfmpeg() {
+  if (!instance) {
+    loading = null;
+    return;
+  }
+  try {
+    instance.terminate();
+  } catch {
+    // ignore termination errors; the goal is to drop the WASM worker/memory.
+  }
+  instance = null;
+  loading = null;
 }

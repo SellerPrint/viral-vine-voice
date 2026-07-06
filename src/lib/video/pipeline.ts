@@ -1,4 +1,4 @@
-import { getFfmpeg } from "./ffmpeg-client";
+import { getFfmpeg, releaseFfmpeg } from "./ffmpeg-client";
 import { transcribeAudio, translateSegments, synthesizeSpeech } from "@/lib/ai.functions";
 import {
   DEFAULT_MASKS,
@@ -161,8 +161,11 @@ export async function runPipeline(
   const masks = opts?.masks ?? DEFAULT_MASKS;
   progress("ffmpeg", "Chargement du moteur vidéo (~30 Mo)…");
   const ff = await getFfmpeg(undefined, (p) => progress("ffmpeg-progress", undefined, p));
+  const cleanupNames = new Set<string>();
 
+  try {
   const inputName = "input.mp4";
+  cleanupNames.add(inputName);
   progress("upload", "Import du fichier…");
   await ff.writeFile(inputName, input.bytes);
 
@@ -258,6 +261,7 @@ export async function runPipeline(
     const part = audioParts[i];
     if (!part.bytes.length) continue;
     const name = `tts_${i}.mp3`;
+    cleanupNames.add(name);
     await ff.writeFile(name, part.bytes);
     inputs.push("-i", name);
     // shift to nearest kept interval mapping
@@ -328,6 +332,7 @@ export async function runPipeline(
   const ttfBuf = ttfRes.ok
     ? new Uint8Array(await ttfRes.arrayBuffer())
     : new Uint8Array(await fontRes.arrayBuffer());
+  cleanupNames.add("/tmp/font.ttf");
   await ff.writeFile("/tmp/font.ttf", ttfBuf);
 
   // Mask burned-in FR subtitles / logos with `delogo` (subtle blur / interpolation
@@ -393,18 +398,20 @@ export async function runPipeline(
     "output.mp4",
   ];
 
+  cleanupNames.add("output.mp4");
   await ff.exec(args);
 
   const outBytes = (await ff.readFile("output.mp4")) as Uint8Array;
   const blob = new Blob([outBytes.buffer.slice(0) as ArrayBuffer], { type: "video/mp4" });
 
   // Free memory: unlink intermediate files from the in-memory FS.
-  const cleanup = ["input.mp4", "audio.wav", "output.mp4", "/tmp/font.ttf"];
-  for (let i = 0; i < audioParts.length; i++) cleanup.push(`tts_${i}.mp3`);
-  for (const name of cleanup) {
-    try { await ff.deleteFile(name); } catch { /* ignore */ }
-  }
-
   progress("done", "Terminé");
   return { videoBlob: blob, segments };
+  } finally {
+    cleanupNames.add("audio.wav");
+    for (const name of cleanupNames) {
+      try { await ff.deleteFile(name); } catch { /* ignore */ }
+    }
+    releaseFfmpeg();
+  }
 }
