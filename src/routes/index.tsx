@@ -80,9 +80,11 @@ function Home() {
     setError(null);
     setOutput(null);
     setPct(0);
+    const bytes = file.bytes;
+    const name = file.name;
     try {
       const res = await runPipeline(
-        { name: file.name, bytes: file.bytes },
+        { name, bytes },
         (s, d, p) => {
           setStep(s as StepKey);
           if (d !== undefined) setDetail(d);
@@ -91,6 +93,8 @@ function Home() {
         { preset, overrides, masks },
       );
       const url = URL.createObjectURL(res.videoBlob);
+      // Free the raw input bytes now that rendering is done.
+      setFile(null);
       setOutput({ url, segments: res.segments });
       setStep("done");
       setPct(1);
