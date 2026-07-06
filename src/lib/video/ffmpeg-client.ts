@@ -1,16 +1,22 @@
-import { FFmpeg } from "@ffmpeg/ffmpeg";
-import { toBlobURL } from "@ffmpeg/util";
+import type { FFmpeg as FFmpegType } from "@ffmpeg/ffmpeg";
 
-let instance: FFmpeg | null = null;
-let loading: Promise<FFmpeg> | null = null;
+let instance: FFmpegType | null = null;
+let loading: Promise<FFmpegType> | null = null;
 
 const CORE_VERSION = "0.12.6";
 const CORE_BASE = `https://unpkg.com/@ffmpeg/core@${CORE_VERSION}/dist/esm`;
 
 export async function getFfmpeg(onLog?: (m: string) => void, onProgress?: (p: number) => void) {
+  if (typeof window === "undefined") {
+    throw new Error("Le moteur vidéo doit être chargé dans le navigateur.");
+  }
   if (instance) return instance;
   if (loading) return loading;
   loading = (async () => {
+    const [{ FFmpeg }, { toBlobURL }] = await Promise.all([
+      import("@ffmpeg/ffmpeg"),
+      import("@ffmpeg/util"),
+    ]);
     const ff = new FFmpeg();
     ff.on("log", ({ message }) => {
       if (onLog) onLog(message);
