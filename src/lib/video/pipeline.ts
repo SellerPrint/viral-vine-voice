@@ -398,6 +398,13 @@ export async function runPipeline(
   const outBytes = (await ff.readFile("output.mp4")) as Uint8Array;
   const blob = new Blob([outBytes.buffer.slice(0) as ArrayBuffer], { type: "video/mp4" });
 
+  // Free memory: unlink intermediate files from the in-memory FS.
+  const cleanup = ["input.mp4", "audio.wav", "output.mp4", "/tmp/font.ttf"];
+  for (let i = 0; i < audioParts.length; i++) cleanup.push(`tts_${i}.mp3`);
+  for (const name of cleanup) {
+    try { await ff.deleteFile(name); } catch { /* ignore */ }
+  }
+
   progress("done", "Terminé");
   return { videoBlob: blob, segments };
 }
