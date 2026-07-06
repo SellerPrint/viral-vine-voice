@@ -24,7 +24,7 @@ export function SettingsPanel({ file, preset, overrides, masks, onChange }: Prop
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
   useEffect(() => {
-    const blob = new Blob([file.bytes], { type: "video/mp4" });
+    const blob = new Blob([file.bytes as unknown as BlobPart], { type: "video/mp4" });
     const url = URL.createObjectURL(blob);
     setVideoBlob(blob);
     setVideoUrl(url);
