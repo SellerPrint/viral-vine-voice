@@ -1,5 +1,5 @@
 import { getFfmpeg, releaseFfmpeg } from "./ffmpeg-client";
-import { transcribeAudio, translateSegments, synthesizeSpeech } from "@/lib/ai.functions";
+import { transcribeAudio, translateSegments } from "@/lib/ai.functions";
 import {
   DEFAULT_MASKS,
   SUBTITLE_PRESETS,
@@ -35,82 +35,6 @@ const wait = (ms: number) => new Promise((resolve) => window.setTimeout(resolve,
 
 function exactArrayBuffer(bytes: Uint8Array): ArrayBuffer {
   return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
-}
-
-function encodeWav(buffer: AudioBuffer): Uint8Array {
-  const channels = Math.min(2, buffer.numberOfChannels || 1);
-  const length = buffer.length;
-  const bytesPerSample = 2;
-  const blockAlign = channels * bytesPerSample;
-  const dataSize = length * blockAlign;
-  const out = new ArrayBuffer(44 + dataSize);
-  const view = new DataView(out);
-
-  const write = (offset: number, value: string) => {
-    for (let i = 0; i < value.length; i++) view.setUint8(offset + i, value.charCodeAt(i));
-  };
-
-  write(0, "RIFF");
-  view.setUint32(4, 36 + dataSize, true);
-  write(8, "WAVE");
-  write(12, "fmt ");
-  view.setUint32(16, 16, true);
-  view.setUint16(20, 1, true);
-  view.setUint16(22, channels, true);
-  view.setUint32(24, buffer.sampleRate, true);
-  view.setUint32(28, buffer.sampleRate * blockAlign, true);
-  view.setUint16(32, blockAlign, true);
-  view.setUint16(34, 16, true);
-  write(36, "data");
-  view.setUint32(40, dataSize, true);
-
-  const channelData = Array.from({ length: channels }, (_, c) => buffer.getChannelData(c));
-  let offset = 44;
-  for (let i = 0; i < length; i++) {
-    for (let c = 0; c < channels; c++) {
-      const sample = Math.max(-1, Math.min(1, channelData[c][i]));
-      view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7fff, true);
-      offset += bytesPerSample;
-    }
-  }
-
-  return new Uint8Array(out);
-}
-
-async function composeNarrationWav(
-  parts: { start: number; bytes: Uint8Array }[],
-  duration: number,
-): Promise<Uint8Array | null> {
-  const valid = parts.filter((part) => part.bytes.byteLength > 0);
-  if (!valid.length) return null;
-
-  const sampleRate = 44100;
-  const decoder = new AudioContext({ sampleRate });
-
-  try {
-    const decodedParts = [] as { start: number; buffer: AudioBuffer }[];
-    for (const part of valid) {
-      decodedParts.push({ start: part.start, buffer: await decoder.decodeAudioData(exactArrayBuffer(part.bytes)) });
-    }
-
-    const renderDuration = Math.max(
-      duration + 1,
-      ...decodedParts.map((part) => part.start + part.buffer.duration + 0.25),
-    );
-    const offline = new OfflineAudioContext(2, Math.ceil(renderDuration * sampleRate), sampleRate);
-
-    for (const part of decodedParts) {
-      const source = offline.createBufferSource();
-      source.buffer = part.buffer;
-      source.connect(offline.destination);
-      source.start(Math.max(0, part.start));
-    }
-
-    const rendered = await offline.startRendering();
-    return encodeWav(rendered);
-  } finally {
-    await decoder.close().catch(() => undefined);
-  }
 }
 
 export async function readFileBytes(file: File): Promise<Uint8Array> {
@@ -296,64 +220,19 @@ export async function runPipeline(
     data: { segments: rawSegments.map((s) => ({ text: s.text, start: s.start, end: s.end })) },
   });
 
-  // 5. TTS EN for each segment (parallel, batched)
-  progress("tts", `Synthèse vocale anglaise (${segments.length} segments)…`);
-  const audioParts: { start: number; bytes: Uint8Array }[] = new Array(segments.length);
-  const concurrency = 3;
-  let done = 0;
-  const queue = segments.map((s, i) => ({ s, i }));
-  async function worker() {
-    while (queue.length) {
-      const item = queue.shift();
-      if (!item) return;
-      if (!item.s.textEn.trim()) {
-        audioParts[item.i] = { start: item.s.start, bytes: new Uint8Array() };
-        done++;
-        progress("tts", `Segment ${done}/${segments.length}`, done / segments.length);
-        continue;
-      }
-      const targetDur = item.s.end - item.s.start;
-      // rough speed adjustment so English fits approximate duration
-      const words = item.s.textEn.split(/\s+/).length;
-      const estDur = words / 2.7; // ~2.7 words/sec at speed 1
-      let speed = 1.0;
-      if (estDur > targetDur * 1.15) speed = Math.min(1.2, estDur / targetDur);
-      const { audioBase64 } = await synthesizeSpeech({
-        data: { text: item.s.textEn, speed },
-      });
-      audioParts[item.i] = { start: item.s.start, bytes: base64ToBytes(audioBase64) };
-      done++;
-      progress("tts", `Segment ${done}/${segments.length}`, done / segments.length);
-    }
-  }
-  await Promise.all(Array.from({ length: concurrency }, worker));
-
-  // 6. Compose one narration WAV in WebAudio first. Feeding ffmpeg.wasm dozens of
-  // MP3 inputs is what triggers the generic `ErrnoError: FS error` on longer TikToks.
-  progress("compose", "Préparation de la piste audio anglaise…");
-  const narrationWav = await composeNarrationWav(audioParts, duration);
-  const inputs: string[] = ["-i", inputName];
-  if (narrationWav) {
-    cleanupNames.add("voice.wav");
-    await ff.writeFile("voice.wav", narrationWav);
-    inputs.push("-i", "voice.wav");
-  }
-
-  // 7. Build filter graph:
-  //    - drawbox black covering bottom 18% (typical TikTok caption strip)
-  //    - drawtext for burned-in EN subtitles (per segment via enable='between(t,s,e)')
-  //    - concat kept intervals via select filter to cut silences
-  //    - audio: mix all TTS inputs with adelay
-
-  // Build a select-timestamps expression to keep only "kept" intervals
-  const keepExpr =
-    kept.length > 0
-      ? kept.map((k) => `between(t,${k.start.toFixed(3)},${k.end.toFixed(3)})`).join("+")
-      : "1";
+  // 5. Stable render mode: subtitles are burned in, original audio is copied.
+  // This returns to the pre-FS-error behavior by avoiding heavy FFmpeg audio
+  // mixing, dozens of MP3 inputs, silence cuts and delogo passes in one render.
+  progress("tts", "Mode stable : voix originale conservée…", 1);
 
   // Escape text for drawtext
   const esc = (s: string) =>
-    s.replace(/\\/g, "\\\\").replace(/:/g, "\\:").replace(/'/g, "\u2019").replace(/%/g, "\\%");
+    s
+      .replace(/\\/g, "\\\\")
+      .replace(/:/g, "\\:")
+      .replace(/,/g, "\\,")
+      .replace(/'/g, "\u2019")
+      .replace(/%/g, "\\%");
 
   // Wrap long lines so subtitles stay fully on screen (portrait 9:16).
   const wrapText = (raw: string, maxChars: number, maxLines: number) => {
@@ -375,7 +254,7 @@ export async function runPipeline(
       }
     }
     if (cur.length) lines.push(cur);
-    return lines.join("\n");
+    return lines.join("\\n");
   };
 
   const drawTextFilters = segments
@@ -405,50 +284,19 @@ export async function runPipeline(
   cleanupNames.add("font.ttf");
   await ff.writeFile("font.ttf", ttfBuf);
 
-  // Mask burned-in FR subtitles / logos with `delogo` (subtle blur / interpolation
-  // from surrounding pixels). Much less intrusive than solid black boxes and
-  // the new EN subtitles are drawn on top so the previous caption band is
-  // fully covered even if the blur remains faintly visible.
-  const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
-  const enabledMasks = masks.filter((m) => m.enabled && m.w > 0.01 && m.h > 0.01);
-  const maskFilters = enabledMasks
-    .map((m) => {
-      const x = clamp(m.x, 0.001, 0.98);
-      const y = clamp(m.y, 0.001, 0.98);
-      const w = clamp(m.w, 0.01, 1 - x - 0.002);
-      const h = clamp(m.h, 0.01, 1 - y - 0.002);
-      return `delogo=x=iw*${x.toFixed(3)}:y=ih*${y.toFixed(3)}:w=iw*${w.toFixed(3)}:h=ih*${h.toFixed(3)}:show=0`;
-    })
-    .join(",");
-
-  const videoFilter = [
-    maskFilters,
-    drawTextFilters,
-    `select='${keepExpr}',setpts=N/FRAME_RATE/TB`,
-  ]
-    .filter(Boolean)
-    .join(",");
-
-  // Audio graph: build mixed narration then re-time it too
-  let audioFilter: string;
-  if (!narrationWav) {
-    audioFilter = `anullsrc=r=44100:cl=stereo,atrim=0:${duration.toFixed(3)}[aout]`;
-  } else {
-    audioFilter = `[1:a]aformat=sample_fmts=fltp:sample_rates=44100:channel_layouts=stereo,aselect='${keepExpr}',asetpts=N/SR/TB[aout]`;
-  }
-
-  const filterComplex = `[0:v]${videoFilter}[vout];${audioFilter}`;
+  const videoFilter = drawTextFilters || "null";
 
   progress("compose", "Assemblage final (ffmpeg)…");
   const args = [
     "-y",
-    ...inputs,
-    "-filter_complex",
-    filterComplex,
+    "-i",
+    inputName,
+    "-vf",
+    videoFilter,
     "-map",
-    "[vout]",
+    "0:v:0",
     "-map",
-    "[aout]",
+    "0:a?",
     "-c:v",
     "libx264",
     "-preset",
@@ -456,9 +304,7 @@ export async function runPipeline(
     "-crf",
     "24",
     "-c:a",
-    "aac",
-    "-b:a",
-    "160k",
+    "copy",
     "-movflags",
     "+faststart",
     "output.mp4",
