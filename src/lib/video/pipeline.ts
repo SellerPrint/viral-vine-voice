@@ -85,15 +85,23 @@ async function composeNarrationWav(
   if (!valid.length) return null;
 
   const sampleRate = 44100;
-  const renderDuration = Math.max(duration + 1, ...valid.map((part) => part.start + 8));
-  const offline = new OfflineAudioContext(2, Math.ceil(renderDuration * sampleRate), sampleRate);
   const decoder = new AudioContext({ sampleRate });
 
   try {
+    const decodedParts = [] as { start: number; buffer: AudioBuffer }[];
     for (const part of valid) {
-      const decoded = await decoder.decodeAudioData(exactArrayBuffer(part.bytes));
+      decodedParts.push({ start: part.start, buffer: await decoder.decodeAudioData(exactArrayBuffer(part.bytes)) });
+    }
+
+    const renderDuration = Math.max(
+      duration + 1,
+      ...decodedParts.map((part) => part.start + part.buffer.duration + 0.25),
+    );
+    const offline = new OfflineAudioContext(2, Math.ceil(renderDuration * sampleRate), sampleRate);
+
+    for (const part of decodedParts) {
       const source = offline.createBufferSource();
-      source.buffer = decoded;
+      source.buffer = part.buffer;
       source.connect(offline.destination);
       source.start(Math.max(0, part.start));
     }
@@ -238,6 +246,7 @@ export async function runPipeline(
   try {
   const inputName = "input.mp4";
   cleanupNames.add(inputName);
+  cleanupNames.add("audio.wav");
   progress("upload", "Import du fichier…");
   await ff.writeFile(inputName, input.bytes);
 
