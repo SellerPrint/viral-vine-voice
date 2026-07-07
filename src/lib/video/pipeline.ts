@@ -33,6 +33,86 @@ function base64ToBytes(b64: string) {
 
 const wait = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
 
+function exactArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+}
+
+function encodeWav(buffer: AudioBuffer): Uint8Array {
+  const channels = Math.min(2, buffer.numberOfChannels || 1);
+  const length = buffer.length;
+  const bytesPerSample = 2;
+  const blockAlign = channels * bytesPerSample;
+  const dataSize = length * blockAlign;
+  const out = new ArrayBuffer(44 + dataSize);
+  const view = new DataView(out);
+
+  const write = (offset: number, value: string) => {
+    for (let i = 0; i < value.length; i++) view.setUint8(offset + i, value.charCodeAt(i));
+  };
+
+  write(0, "RIFF");
+  view.setUint32(4, 36 + dataSize, true);
+  write(8, "WAVE");
+  write(12, "fmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, channels, true);
+  view.setUint32(24, buffer.sampleRate, true);
+  view.setUint32(28, buffer.sampleRate * blockAlign, true);
+  view.setUint16(32, blockAlign, true);
+  view.setUint16(34, 16, true);
+  write(36, "data");
+  view.setUint32(40, dataSize, true);
+
+  const channelData = Array.from({ length: channels }, (_, c) => buffer.getChannelData(c));
+  let offset = 44;
+  for (let i = 0; i < length; i++) {
+    for (let c = 0; c < channels; c++) {
+      const sample = Math.max(-1, Math.min(1, channelData[c][i]));
+      view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7fff, true);
+      offset += bytesPerSample;
+    }
+  }
+
+  return new Uint8Array(out);
+}
+
+async function composeNarrationWav(
+  parts: { start: number; bytes: Uint8Array }[],
+  duration: number,
+): Promise<Uint8Array | null> {
+  const valid = parts.filter((part) => part.bytes.byteLength > 0);
+  if (!valid.length) return null;
+
+  const sampleRate = 44100;
+  const decoder = new AudioContext({ sampleRate });
+
+  try {
+    const decodedParts = [] as { start: number; buffer: AudioBuffer }[];
+    for (const part of valid) {
+      decodedParts.push({ start: part.start, buffer: await decoder.decodeAudioData(exactArrayBuffer(part.bytes)) });
+    }
+
+    const renderDuration = Math.max(
+      duration + 1,
+      ...decodedParts.map((part) => part.start + part.buffer.duration + 0.25),
+    );
+    const offline = new OfflineAudioContext(2, Math.ceil(renderDuration * sampleRate), sampleRate);
+
+    for (const part of decodedParts) {
+      const source = offline.createBufferSource();
+      source.buffer = part.buffer;
+      source.connect(offline.destination);
+      source.start(Math.max(0, part.start));
+    }
+
+    const rendered = await offline.startRendering();
+    return encodeWav(rendered);
+  } finally {
+    await decoder.close().catch(() => undefined);
+  }
+}
+
 export async function readFileBytes(file: File): Promise<Uint8Array> {
   const attempts: Array<() => Promise<ArrayBuffer | Uint8Array>> = [
     () => file.arrayBuffer(),
@@ -104,7 +184,7 @@ export function groupWordsToSegments(words: Word[]): { text: string; start: numb
 /** Detect silence intervals from a mono 16k WAV using an AudioContext. */
 export async function detectSilences(wavBytes: Uint8Array): Promise<{ start: number; end: number }[]> {
   const ctx = new AudioContext();
-  const buf = await ctx.decodeAudioData(wavBytes.buffer.slice(0) as ArrayBuffer);
+  const buf = await ctx.decodeAudioData(exactArrayBuffer(wavBytes));
   const data = buf.getChannelData(0);
   const sampleRate = buf.sampleRate;
   const winSize = Math.floor(0.02 * sampleRate); // 20ms
@@ -166,6 +246,7 @@ export async function runPipeline(
   try {
   const inputName = "input.mp4";
   cleanupNames.add(inputName);
+  cleanupNames.add("audio.wav");
   progress("upload", "Import du fichier…");
   await ff.writeFile(inputName, input.bytes);
 
@@ -192,7 +273,7 @@ export async function runPipeline(
   if (!duration) {
     // fallback via wav length
     const ctx = new AudioContext();
-    const buf = await ctx.decodeAudioData(wav.buffer.slice(0) as ArrayBuffer);
+    const buf = await ctx.decodeAudioData(exactArrayBuffer(wav));
     duration = buf.duration;
     ctx.close();
   }
@@ -201,7 +282,7 @@ export async function runPipeline(
 
   // 3. Transcribe (FR)
   progress("transcribe", "Transcription française via ElevenLabs…");
-  const audioB64 = arrayBufferToBase64(wav.buffer.slice(0) as ArrayBuffer);
+  const audioB64 = arrayBufferToBase64(exactArrayBuffer(wav));
   const { words } = await transcribeAudio({ data: { audioBase64: audioB64, mime: "audio/wav" } });
   const rawSegments = groupWordsToSegments(words);
 
@@ -247,26 +328,15 @@ export async function runPipeline(
   }
   await Promise.all(Array.from({ length: concurrency }, worker));
 
-  // 6. Write each TTS mp3 as a wav for easier mixing timing
+  // 6. Compose one narration WAV in WebAudio first. Feeding ffmpeg.wasm dozens of
+  // MP3 inputs is what triggers the generic `ErrnoError: FS error` on longer TikToks.
   progress("compose", "Préparation de la piste audio anglaise…");
-  // Build a silent base audio of full (trimmed) duration; overlay each TTS at its start.
-  // Simpler: produce a filter_complex that takes original video + each mp3 input,
-  // trims/positions each with adelay, mixes them, and pastes onto muted video.
-
-  // Write mp3 files
+  const narrationWav = await composeNarrationWav(audioParts, duration);
   const inputs: string[] = ["-i", inputName];
-  const audioInputs: { idx: number; delayMs: number }[] = [];
-  let idx = 1;
-  for (let i = 0; i < audioParts.length; i++) {
-    const part = audioParts[i];
-    if (!part.bytes.length) continue;
-    const name = `tts_${i}.mp3`;
-    cleanupNames.add(name);
-    await ff.writeFile(name, part.bytes);
-    inputs.push("-i", name);
-    // shift to nearest kept interval mapping
-    audioInputs.push({ idx, delayMs: Math.max(0, Math.round(part.start * 1000)) });
-    idx++;
+  if (narrationWav) {
+    cleanupNames.add("voice.wav");
+    await ff.writeFile("voice.wav", narrationWav);
+    inputs.push("-i", "voice.wav");
   }
 
   // 7. Build filter graph:
@@ -317,7 +387,7 @@ export async function runPipeline(
       const start = s.start.toFixed(3);
       const end = s.end.toFixed(3);
       // yAnchor is the vertical center of the text block in the frame (0..1)
-      return `drawtext=fontfile=/tmp/font.ttf:text='${text}':fontcolor=${preset.fontColor}:fontsize=${preset.fontsize}:line_spacing=${preset.lineSpacing}:box=1:boxcolor=${preset.boxColor}:boxborderw=${preset.boxBorderW}:x=(w-text_w)/2:y=h*${preset.yAnchor.toFixed(3)}-text_h/2:enable='between(t,${start},${end})'`;
+      return `drawtext=fontfile=font.ttf:text='${text}':fontcolor=${preset.fontColor}:fontsize=${preset.fontsize}:line_spacing=${preset.lineSpacing}:box=1:boxcolor=${preset.boxColor}:boxborderw=${preset.boxBorderW}:x=(w-text_w)/2:y=h*${preset.yAnchor.toFixed(3)}-text_h/2:enable='between(t,${start},${end})'`;
     })
     .join(",");
 
@@ -332,8 +402,8 @@ export async function runPipeline(
   const ttfBuf = ttfRes.ok
     ? new Uint8Array(await ttfRes.arrayBuffer())
     : new Uint8Array(await fontRes.arrayBuffer());
-  cleanupNames.add("/tmp/font.ttf");
-  await ff.writeFile("/tmp/font.ttf", ttfBuf);
+  cleanupNames.add("font.ttf");
+  await ff.writeFile("font.ttf", ttfBuf);
 
   // Mask burned-in FR subtitles / logos with `delogo` (subtle blur / interpolation
   // from surrounding pixels). Much less intrusive than solid black boxes and
@@ -361,14 +431,10 @@ export async function runPipeline(
 
   // Audio graph: build mixed narration then re-time it too
   let audioFilter: string;
-  if (audioInputs.length === 0) {
+  if (!narrationWav) {
     audioFilter = `anullsrc=r=44100:cl=stereo,atrim=0:${duration.toFixed(3)}[aout]`;
   } else {
-    const parts = audioInputs
-      .map((a, i) => `[${a.idx}:a]adelay=${a.delayMs}|${a.delayMs},aformat=sample_fmts=fltp:sample_rates=44100:channel_layouts=stereo[a${i}]`)
-      .join(";");
-    const mixInputs = audioInputs.map((_, i) => `[a${i}]`).join("");
-    audioFilter = `${parts};${mixInputs}amix=inputs=${audioInputs.length}:normalize=0:dropout_transition=0[amix];[amix]aselect='${keepExpr}',asetpts=N/SR/TB[aout]`;
+    audioFilter = `[1:a]aformat=sample_fmts=fltp:sample_rates=44100:channel_layouts=stereo,aselect='${keepExpr}',asetpts=N/SR/TB[aout]`;
   }
 
   const filterComplex = `[0:v]${videoFilter}[vout];${audioFilter}`;
@@ -399,7 +465,15 @@ export async function runPipeline(
   ];
 
   cleanupNames.add("output.mp4");
-  await ff.exec(args);
+  try {
+    await ff.exec(args);
+  } catch (error) {
+    throw new Error(
+      `Le rendu vidéo a échoué dans le système de fichiers FFmpeg. Réessaie avec une vidéo plus courte ou sans zones de masquage très grandes. ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
 
   const outBytes = (await ff.readFile("output.mp4")) as Uint8Array;
   const blob = new Blob([outBytes.buffer.slice(0) as ArrayBuffer], { type: "video/mp4" });
@@ -408,7 +482,6 @@ export async function runPipeline(
   progress("done", "Terminé");
   return { videoBlob: blob, segments };
   } finally {
-    cleanupNames.add("audio.wav");
     for (const name of cleanupNames) {
       try { await ff.deleteFile(name); } catch { /* ignore */ }
     }
