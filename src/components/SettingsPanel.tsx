@@ -70,6 +70,28 @@ export function SettingsPanel({ file, preset, overrides, masks, targetLanguage, 
   return (
     <div className="mt-6 space-y-6 rounded-2xl border border-border bg-background/40 p-5">
       <div>
+        <h3 className="font-display text-lg font-bold">Langue finale</h3>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Langue des sous-titres traduits (et de la voix off).
+        </p>
+        <div className="mt-3 flex flex-wrap gap-2">
+          {TARGET_LANGUAGES.map((l) => (
+            <button
+              key={l.code}
+              onClick={() => update({ targetLanguage: l })}
+              className={`rounded-full border px-3 py-1.5 text-xs transition ${
+                targetLanguage.code === l.code
+                  ? "border-primary bg-primary/10 text-foreground"
+                  : "border-border text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {l.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div>
         <div className="flex items-center justify-between">
           <h3 className="font-display text-lg font-bold">Réglages sous-titres</h3>
         </div>
