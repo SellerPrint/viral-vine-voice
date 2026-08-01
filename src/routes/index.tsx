@@ -99,7 +99,7 @@ function Home() {
           if (d !== undefined) setDetail(d);
           if (p !== undefined) setPct(p);
         },
-        { preset, overrides, masks },
+        { preset, overrides, masks, targetLanguage },
       );
       const url = URL.createObjectURL(res.videoBlob);
       // Free the raw input bytes now that rendering is done.

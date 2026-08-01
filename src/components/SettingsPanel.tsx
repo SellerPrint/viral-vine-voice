@@ -2,21 +2,31 @@ import { useEffect, useRef, useState } from "react";
 import {
   DEFAULT_MASKS,
   SUBTITLE_PRESETS,
+  TARGET_LANGUAGES,
   type MaskZone,
   type SubtitleOverrides,
   type SubtitlePreset,
+  type TargetLanguage,
 } from "@/lib/video/presets";
 import { detectMaskZones } from "@/lib/video/detect";
+
+type Change = {
+  preset: SubtitlePreset;
+  overrides: SubtitleOverrides;
+  masks: MaskZone[];
+  targetLanguage: TargetLanguage;
+};
 
 type Props = {
   file: { name: string; size: number; bytes: Uint8Array };
   preset: SubtitlePreset;
   overrides: SubtitleOverrides;
   masks: MaskZone[];
-  onChange: (v: { preset: SubtitlePreset; overrides: SubtitleOverrides; masks: MaskZone[] }) => void;
+  targetLanguage: TargetLanguage;
+  onChange: (v: Change) => void;
 };
 
-export function SettingsPanel({ file, preset, overrides, masks, onChange }: Props) {
+export function SettingsPanel({ file, preset, overrides, masks, targetLanguage, onChange }: Props) {
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [videoBlob, setVideoBlob] = useState<Blob | null>(null);
   const [dims, setDims] = useState<{ w: number; h: number } | null>(null);
@@ -34,8 +44,8 @@ export function SettingsPanel({ file, preset, overrides, masks, onChange }: Prop
     };
   }, [file]);
 
-  const update = (patch: Partial<{ preset: SubtitlePreset; overrides: SubtitleOverrides; masks: MaskZone[] }>) =>
-    onChange({ preset, overrides, masks, ...patch });
+  const update = (patch: Partial<Change>) =>
+    onChange({ preset, overrides, masks, targetLanguage, ...patch });
 
   const effective = { ...preset, ...overrides };
 
