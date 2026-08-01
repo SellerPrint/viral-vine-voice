@@ -4,9 +4,11 @@ import { readFileBytes, runPipeline, type Segment, type VideoInput } from "@/lib
 import {
   DEFAULT_MASKS,
   SUBTITLE_PRESETS,
+  TARGET_LANGUAGES,
   type MaskZone,
   type SubtitleOverrides,
   type SubtitlePreset,
+  type TargetLanguage,
 } from "@/lib/video/presets";
 import { SettingsPanel } from "@/components/SettingsPanel";
 
@@ -219,10 +221,12 @@ function Home() {
                     preset={preset}
                     overrides={overrides}
                     masks={masks}
+                    targetLanguage={targetLanguage}
                     onChange={(v) => {
                       setPreset(v.preset);
                       setOverrides(v.overrides);
                       setMasks(v.masks);
+                      if (v.targetLanguage) setTargetLanguage(v.targetLanguage);
                     }}
                   />
                 )}
