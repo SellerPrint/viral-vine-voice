@@ -214,10 +214,14 @@ export async function runPipeline(
     throw new Error("Aucune parole détectée dans la vidéo.");
   }
 
-  // 4. Translate FR -> EN
-  progress("translate", "Traduction française → anglaise…");
+  // 4. Translate FR -> langue cible
+  const targetLanguage = opts?.targetLanguage ?? { code: "en", label: "Anglais", name: "English" };
+  progress("translate", `Traduction française → ${targetLanguage.name}…`);
   const { segments } = await translateSegments({
-    data: { segments: rawSegments.map((s) => ({ text: s.text, start: s.start, end: s.end })) },
+    data: {
+      segments: rawSegments.map((s) => ({ text: s.text, start: s.start, end: s.end })),
+      targetLanguage: targetLanguage.name,
+    },
   });
 
   // 5. Stable render mode: subtitles are burned in, original audio is copied.
