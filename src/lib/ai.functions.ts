@@ -50,13 +50,15 @@ export const translateSegments = createServerFn({ method: "POST" })
     z
       .object({
         segments: z.array(z.object({ text: z.string(), start: z.number(), end: z.number() })),
+        targetLanguage: z.string().default("English"),
       })
       .parse(input),
   )
   .handler(async ({ data }) => {
     if (data.segments.length === 0) return { segments: [] };
+    const lang = data.targetLanguage || "English";
 
-    const prompt = `You are a translator for viral TikTok content. Translate each French segment into natural, punchy English suitable for a voice-over. Keep it concise so the English roughly matches the French duration. Return exactly one translation per input segment, in order.
+    const prompt = `You are a translator for viral TikTok content. Translate each French segment into natural, punchy ${lang} suitable for a voice-over. Keep it concise so the translation roughly matches the French duration. Return exactly one translation per input segment, in order.
 
 INPUT SEGMENTS (FR):
 ${data.segments.map((s, i) => `${i + 1}. [${s.end - s.start}s] ${s.text}`).join("\n")}`;
