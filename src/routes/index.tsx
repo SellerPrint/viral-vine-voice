@@ -49,6 +49,7 @@ function Home() {
   const [preset, setPreset] = useState<SubtitlePreset>(SUBTITLE_PRESETS[0]);
   const [overrides, setOverrides] = useState<SubtitleOverrides>({});
   const [masks, setMasks] = useState<MaskZone[]>(DEFAULT_MASKS);
+  const [targetLanguage, setTargetLanguage] = useState<TargetLanguage>(TARGET_LANGUAGES[0]);
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   const handleFile = async (f: File | null) => {
