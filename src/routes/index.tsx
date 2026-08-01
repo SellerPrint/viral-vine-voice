@@ -53,8 +53,14 @@ function Home() {
     setError(null);
     setOutput(null);
     if (!f) return setFile(null);
-    if (!f.type.startsWith("video/")) {
-      setError("Merci d'importer un fichier vidéo (MP4).");
+    const looksVideo =
+      f.type.startsWith("video/") || /\.(mp4|mov|m4v|webm|mkv|avi|3gp)$/i.test(f.name);
+    if (!looksVideo) {
+      setError("Merci d'importer un fichier vidéo (MP4, MOV, WEBM…).");
+      return;
+    }
+    if (f.size === 0) {
+      setError("Ce fichier est vide ou illisible. Réenregistre-le dans la galerie puis réessaie.");
       return;
     }
     if (f.size > 60 * 1024 * 1024) {
