@@ -2,21 +2,31 @@ import { useEffect, useRef, useState } from "react";
 import {
   DEFAULT_MASKS,
   SUBTITLE_PRESETS,
+  TARGET_LANGUAGES,
   type MaskZone,
   type SubtitleOverrides,
   type SubtitlePreset,
+  type TargetLanguage,
 } from "@/lib/video/presets";
 import { detectMaskZones } from "@/lib/video/detect";
+
+type Change = {
+  preset: SubtitlePreset;
+  overrides: SubtitleOverrides;
+  masks: MaskZone[];
+  targetLanguage: TargetLanguage;
+};
 
 type Props = {
   file: { name: string; size: number; bytes: Uint8Array };
   preset: SubtitlePreset;
   overrides: SubtitleOverrides;
   masks: MaskZone[];
-  onChange: (v: { preset: SubtitlePreset; overrides: SubtitleOverrides; masks: MaskZone[] }) => void;
+  targetLanguage: TargetLanguage;
+  onChange: (v: Change) => void;
 };
 
-export function SettingsPanel({ file, preset, overrides, masks, onChange }: Props) {
+export function SettingsPanel({ file, preset, overrides, masks, targetLanguage, onChange }: Props) {
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [videoBlob, setVideoBlob] = useState<Blob | null>(null);
   const [dims, setDims] = useState<{ w: number; h: number } | null>(null);
@@ -34,8 +44,8 @@ export function SettingsPanel({ file, preset, overrides, masks, onChange }: Prop
     };
   }, [file]);
 
-  const update = (patch: Partial<{ preset: SubtitlePreset; overrides: SubtitleOverrides; masks: MaskZone[] }>) =>
-    onChange({ preset, overrides, masks, ...patch });
+  const update = (patch: Partial<Change>) =>
+    onChange({ preset, overrides, masks, targetLanguage, ...patch });
 
   const effective = { ...preset, ...overrides };
 
@@ -59,6 +69,28 @@ export function SettingsPanel({ file, preset, overrides, masks, onChange }: Prop
 
   return (
     <div className="mt-6 space-y-6 rounded-2xl border border-border bg-background/40 p-5">
+      <div>
+        <h3 className="font-display text-lg font-bold">Langue finale</h3>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Langue des sous-titres traduits (et de la voix off).
+        </p>
+        <div className="mt-3 flex flex-wrap gap-2">
+          {TARGET_LANGUAGES.map((l) => (
+            <button
+              key={l.code}
+              onClick={() => update({ targetLanguage: l })}
+              className={`rounded-full border px-3 py-1.5 text-xs transition ${
+                targetLanguage.code === l.code
+                  ? "border-primary bg-primary/10 text-foreground"
+                  : "border-border text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {l.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
       <div>
         <div className="flex items-center justify-between">
           <h3 className="font-display text-lg font-bold">Réglages sous-titres</h3>

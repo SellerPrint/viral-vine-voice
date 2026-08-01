@@ -214,10 +214,14 @@ export async function runPipeline(
     throw new Error("Aucune parole détectée dans la vidéo.");
   }
 
-  // 4. Translate FR -> EN
-  progress("translate", "Traduction française → anglaise…");
+  // 4. Translate FR -> langue cible
+  const targetLanguage = opts?.targetLanguage ?? { code: "en", label: "Anglais", name: "English" };
+  progress("translate", `Traduction française → ${targetLanguage.name}…`);
   const { segments } = await translateSegments({
-    data: { segments: rawSegments.map((s) => ({ text: s.text, start: s.start, end: s.end })) },
+    data: {
+      segments: rawSegments.map((s) => ({ text: s.text, start: s.start, end: s.end })),
+      targetLanguage: targetLanguage.name,
+    },
   });
 
   // 5. Stable render mode: subtitles are burned in, original audio is copied.
@@ -330,42 +334,65 @@ export async function runPipeline(
 
 
   progress("compose", "Assemblage final (ffmpeg)…");
-  const args = [
-    "-y",
-    "-i",
-    inputName,
-    "-filter_complex",
-    filterComplex,
-    "-map",
-    "[vout]",
-    "-map",
-    "0:a?",
-
-    "-c:v",
-    "libx264",
-    "-preset",
-    "ultrafast",
-    "-crf",
-    "24",
-    "-c:a",
-    "copy",
-    "-movflags",
-    "+faststart",
-    "output.mp4",
-  ];
+  // AAC re-encode (instead of stream copy) : beaucoup de vidéos TikTok ont un
+  // audio (opus / pcm / aac exotique) qui rend le MP4 final illisible en copy.
+  const baseArgs = (audioCodec: "aac" | "none") => {
+    const a = [
+      "-y",
+      "-i",
+      inputName,
+      "-filter_complex",
+      filterComplex,
+      "-map",
+      "[vout]",
+    ];
+    if (audioCodec === "aac") {
+      a.push("-map", "0:a?", "-c:a", "aac", "-b:a", "128k", "-ar", "44100", "-ac", "2");
+    } else {
+      a.push("-an");
+    }
+    a.push(
+      "-c:v",
+      "libx264",
+      "-preset",
+      "ultrafast",
+      "-crf",
+      "24",
+      "-pix_fmt",
+      "yuv420p",
+      "-movflags",
+      "+faststart",
+      "output.mp4",
+    );
+    return a;
+  };
 
   cleanupNames.add("output.mp4");
-  try {
-    await ff.exec(args);
-  } catch (error) {
+  let outBytes: Uint8Array | null = null;
+  let lastError: unknown = null;
+  for (const mode of ["aac", "none"] as const) {
+    try {
+      await ff.exec(baseArgs(mode));
+      const data = (await ff.readFile("output.mp4")) as Uint8Array;
+      // Un fichier trop petit = rendu invalide (ffmpeg a échoué silencieusement).
+      if (data && data.byteLength > 1024) {
+        outBytes = data;
+        break;
+      }
+      lastError = new Error("Fichier de sortie vide ou invalide.");
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  if (!outBytes) {
     throw new Error(
-      `Le rendu vidéo a échoué dans le système de fichiers FFmpeg. Réessaie avec une vidéo plus courte ou sans zones de masquage très grandes. ${
-        error instanceof Error ? error.message : String(error)
-      }`,
+      `La vidéo n'a pas pu être encodée (format source probablement non supporté). Convertis-la en MP4 H.264 ou essaie une vidéo plus courte. ${
+        lastError instanceof Error ? lastError.message : String(lastError ?? "")
+      }`.trim(),
     );
   }
 
-  const outBytes = (await ff.readFile("output.mp4")) as Uint8Array;
   const blob = new Blob([outBytes.buffer.slice(0) as ArrayBuffer], { type: "video/mp4" });
 
   // Free memory: unlink intermediate files from the in-memory FS.

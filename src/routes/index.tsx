@@ -4,9 +4,11 @@ import { readFileBytes, runPipeline, type Segment, type VideoInput } from "@/lib
 import {
   DEFAULT_MASKS,
   SUBTITLE_PRESETS,
+  TARGET_LANGUAGES,
   type MaskZone,
   type SubtitleOverrides,
   type SubtitlePreset,
+  type TargetLanguage,
 } from "@/lib/video/presets";
 import { SettingsPanel } from "@/components/SettingsPanel";
 
@@ -47,14 +49,21 @@ function Home() {
   const [preset, setPreset] = useState<SubtitlePreset>(SUBTITLE_PRESETS[0]);
   const [overrides, setOverrides] = useState<SubtitleOverrides>({});
   const [masks, setMasks] = useState<MaskZone[]>(DEFAULT_MASKS);
+  const [targetLanguage, setTargetLanguage] = useState<TargetLanguage>(TARGET_LANGUAGES[0]);
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   const handleFile = async (f: File | null) => {
     setError(null);
     setOutput(null);
     if (!f) return setFile(null);
-    if (!f.type.startsWith("video/")) {
-      setError("Merci d'importer un fichier vidéo (MP4).");
+    const looksVideo =
+      f.type.startsWith("video/") || /\.(mp4|mov|m4v|webm|mkv|avi|3gp)$/i.test(f.name);
+    if (!looksVideo) {
+      setError("Merci d'importer un fichier vidéo (MP4, MOV, WEBM…).");
+      return;
+    }
+    if (f.size === 0) {
+      setError("Ce fichier est vide ou illisible. Réenregistre-le dans la galerie puis réessaie.");
       return;
     }
     if (f.size > 60 * 1024 * 1024) {
@@ -90,7 +99,7 @@ function Home() {
           if (d !== undefined) setDetail(d);
           if (p !== undefined) setPct(p);
         },
-        { preset, overrides, masks },
+        { preset, overrides, masks, targetLanguage },
       );
       const url = URL.createObjectURL(res.videoBlob);
       // Free the raw input bytes now that rendering is done.
@@ -213,10 +222,12 @@ function Home() {
                     preset={preset}
                     overrides={overrides}
                     masks={masks}
+                    targetLanguage={targetLanguage}
                     onChange={(v) => {
                       setPreset(v.preset);
                       setOverrides(v.overrides);
                       setMasks(v.masks);
+                      if (v.targetLanguage) setTargetLanguage(v.targetLanguage);
                     }}
                   />
                 )}

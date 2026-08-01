@@ -90,10 +90,29 @@ export type SubtitleOverrides = Partial<
   Pick<SubtitlePreset, "fontsize" | "maxCharsPerLine" | "maxLines" | "yAnchor" | "uppercase">
 >;
 
+/** Langue de sortie des sous-titres (et de la future voix off). */
+export type TargetLanguage = { code: string; label: string; name: string };
+
+export const TARGET_LANGUAGES: TargetLanguage[] = [
+  { code: "en", label: "🇬🇧 Anglais", name: "English" },
+  { code: "es", label: "🇪🇸 Espagnol", name: "Spanish" },
+  { code: "pt", label: "🇧🇷 Portugais", name: "Portuguese (Brazil)" },
+  { code: "de", label: "🇩🇪 Allemand", name: "German" },
+  { code: "it", label: "🇮🇹 Italien", name: "Italian" },
+  { code: "nl", label: "🇳🇱 Néerlandais", name: "Dutch" },
+  { code: "ar", label: "🇸🇦 Arabe", name: "Arabic" },
+  { code: "hi", label: "🇮🇳 Hindi", name: "Hindi" },
+  { code: "id", label: "🇮🇩 Indonésien", name: "Indonesian" },
+  { code: "ja", label: "🇯🇵 Japonais", name: "Japanese" },
+  { code: "ko", label: "🇰🇷 Coréen", name: "Korean" },
+  { code: "tr", label: "🇹🇷 Turc", name: "Turkish" },
+];
+
 export type PipelineOptions = {
   preset: SubtitlePreset;
   overrides: SubtitleOverrides;
   masks: MaskZone[];
+  targetLanguage?: TargetLanguage;
 };
 
 export function resolvePreset(preset: SubtitlePreset, o: SubtitleOverrides): SubtitlePreset {
