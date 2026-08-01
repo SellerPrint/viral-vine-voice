@@ -72,7 +72,7 @@ ${data.segments.map((s, i) => `${i + 1}. [${s.end - s.start}s] ${s.text}`).join(
       body: JSON.stringify({
         model: "google/gemini-2.5-flash",
         messages: [
-          { role: "system", content: "You translate French to English for TikTok voice-overs." },
+          { role: "system", content: `You translate French to ${lang} for TikTok voice-overs.` },
           { role: "user", content: prompt },
         ],
         tools: [
