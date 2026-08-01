@@ -225,7 +225,7 @@ export async function runPipeline(
   // mixing, dozens of MP3 inputs, silence cuts and delogo passes in one render.
   progress("tts", "Mode stable : voix originale conservée…", 1);
 
-  // Escape text for drawtext
+  // Escape text for drawtext (per line, newlines added after escaping)
   const esc = (s: string) =>
     s
       .replace(/\\/g, "\\\\")
@@ -235,8 +235,8 @@ export async function runPipeline(
       .replace(/%/g, "\\%");
 
   // Wrap long lines so subtitles stay fully on screen (portrait 9:16).
-  const wrapText = (raw: string, maxChars: number, maxLines: number) => {
-    const words = raw.split(/\s+/);
+  const wrapLines = (raw: string, maxChars: number, maxLines: number) => {
+    const words = raw.split(/\s+/).filter(Boolean);
     const lines: string[] = [];
     let cur = "";
     for (const w of words) {
@@ -244,27 +244,32 @@ export async function runPipeline(
         cur = w;
       } else if ((cur + " " + w).length <= maxChars) {
         cur += " " + w;
+      } else if (lines.length === maxLines - 1) {
+        cur += " " + w;
       } else {
-        if (lines.length === maxLines - 1) {
-          cur += " " + w;
-        } else {
-          lines.push(cur);
-          cur = w;
-        }
+        lines.push(cur);
+        cur = w;
       }
     }
     if (cur.length) lines.push(cur);
-    return lines.join("\\n");
+    return lines;
   };
 
-  const drawTextFilters = segments
+  // Avoid overlapping subtitle cards: clamp each segment's end to the next start.
+  const visible = segments
     .filter((s) => s.textEn.trim())
-    .map((s) => {
+    .sort((a, b) => a.start - b.start);
+
+  const drawTextFilters = visible
+    .map((s, i) => {
       const raw = preset.uppercase ? s.textEn.toUpperCase() : s.textEn;
-      const wrapped = wrapText(raw, preset.maxCharsPerLine, preset.maxLines);
-      const text = esc(wrapped);
+      const text = wrapLines(raw, preset.maxCharsPerLine, preset.maxLines)
+        .map(esc)
+        .join("\\n");
+      const next = visible[i + 1];
       const start = s.start.toFixed(3);
-      const end = s.end.toFixed(3);
+      const rawEnd = next ? Math.min(s.end, next.start - 0.02) : s.end;
+      const end = Math.max(rawEnd, s.start + 0.4).toFixed(3);
       // yAnchor is the vertical center of the text block in the frame (0..1)
       return `drawtext=fontfile=font.ttf:text='${text}':fontcolor=${preset.fontColor}:fontsize=${preset.fontsize}:line_spacing=${preset.lineSpacing}:box=1:boxcolor=${preset.boxColor}:boxborderw=${preset.boxBorderW}:x=(w-text_w)/2:y=h*${preset.yAnchor.toFixed(3)}-text_h/2:enable='between(t,${start},${end})'`;
     })
@@ -284,7 +289,45 @@ export async function runPipeline(
   cleanupNames.add("font.ttf");
   await ff.writeFile("font.ttf", ttfBuf);
 
-  const videoFilter = drawTextFilters || "null";
+  // Mask (blur) the zones where the original FR subtitles / logos are burnt in.
+  const sizeMatch = logs.join("\n").match(/Video:.*?[\s,](\d{2,5})x(\d{2,5})/);
+  const vw = sizeMatch ? +sizeMatch[1] : 0;
+  const vh = sizeMatch ? +sizeMatch[2] : 0;
+  const even = (n: number) => Math.max(16, Math.round(n / 2) * 2);
+  const activeMasks =
+    vw && vh
+      ? masks
+          .filter((m) => m.enabled && m.w > 0.02 && m.h > 0.01)
+          .map((m) => {
+            const w = even(Math.min(m.w, 1) * vw);
+            const h = even(Math.min(m.h, 1) * vh);
+            const x = Math.max(0, Math.min(vw - w, Math.round(m.x * vw / 2) * 2));
+            const y = Math.max(0, Math.min(vh - h, Math.round(m.y * vh / 2) * 2));
+            return { w, h, x, y };
+          })
+          .slice(0, 4)
+      : [];
+
+  let filterComplex = "";
+  if (activeMasks.length) {
+    const parts: string[] = [`[0:v]split=${activeMasks.length + 1}[base]${activeMasks
+      .map((_, i) => `[z${i}]`)
+      .join("")}`];
+    activeMasks.forEach((m, i) => {
+      parts.push(`[z${i}]crop=${m.w}:${m.h}:${m.x}:${m.y},boxblur=18:2[b${i}]`);
+    });
+    let prev = "base";
+    activeMasks.forEach((m, i) => {
+      const out = i === activeMasks.length - 1 ? "masked" : `o${i}`;
+      parts.push(`[${prev}][b${i}]overlay=${m.x}:${m.y}[${out}]`);
+      prev = out;
+    });
+    filterComplex = parts.join(";");
+    filterComplex += `;[masked]${drawTextFilters || "null"}[vout]`;
+  } else {
+    filterComplex = `[0:v]${drawTextFilters || "null"}[vout]`;
+  }
+
 
   progress("compose", "Assemblage final (ffmpeg)…");
   const args = [
