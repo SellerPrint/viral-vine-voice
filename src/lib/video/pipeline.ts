@@ -33,6 +33,87 @@ function base64ToBytes(b64: string) {
 
 const wait = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
 
+/** Encode a mono Float32 track into a 16-bit PCM WAV file. */
+function encodeWav(samples: Float32Array, sampleRate: number): Uint8Array {
+  const bytes = new Uint8Array(44 + samples.length * 2);
+  const view = new DataView(bytes.buffer);
+  const str = (off: number, s: string) => {
+    for (let i = 0; i < s.length; i++) view.setUint8(off + i, s.charCodeAt(i));
+  };
+  str(0, "RIFF");
+  view.setUint32(4, 36 + samples.length * 2, true);
+  str(8, "WAVE");
+  str(12, "fmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * 2, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  str(36, "data");
+  view.setUint32(40, samples.length * 2, true);
+  let off = 44;
+  for (let i = 0; i < samples.length; i++) {
+    const s = Math.max(-1, Math.min(1, samples[i]));
+    view.setInt16(off, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+    off += 2;
+  }
+  return bytes;
+}
+
+/**
+ * Synthesize each translated segment and mix them into a single mono WAV
+ * timeline (one FFmpeg input only → pas d'erreur FS).
+ */
+async function composeNarrationWav(
+  segments: Segment[],
+  duration: number,
+  progress: ProgressCb,
+): Promise<Uint8Array | null> {
+  const usable = segments.filter((s) => s.textEn.trim().length > 1);
+  if (!usable.length || !duration) return null;
+
+  const decodeCtx = new AudioContext();
+  const clips: { buffer: AudioBuffer; start: number; slot: number }[] = [];
+
+  for (let i = 0; i < usable.length; i++) {
+    const s = usable[i];
+    progress("tts", `Voix off ${i + 1}/${usable.length}…`, (i + 1) / usable.length);
+    try {
+      const { audioBase64 } = await synthesizeSpeech({
+        data: { text: s.textEn.trim(), speed: 1.0 },
+      });
+      const bytes = base64ToBytes(audioBase64);
+      const buffer = await decodeCtx.decodeAudioData(exactArrayBuffer(bytes));
+      clips.push({ buffer, start: s.start, slot: Math.max(0.4, s.end - s.start) });
+    } catch {
+      // on ignore un segment raté pour ne pas casser tout le rendu
+    }
+  }
+  decodeCtx.close();
+  if (!clips.length) return null;
+
+  const sampleRate = 24000;
+  const tail = Math.max(
+    duration,
+    ...clips.map((c) => c.start + c.buffer.duration),
+  );
+  const offline = new OfflineAudioContext(1, Math.ceil((tail + 0.5) * sampleRate), sampleRate);
+  for (const c of clips) {
+    const src = offline.createBufferSource();
+    src.buffer = c.buffer;
+    // accélère légèrement si la voix dépasse la durée du segment (max 1.35x)
+    const ratio = c.buffer.duration / c.slot;
+    src.playbackRate.value = Math.min(1.35, Math.max(1, ratio));
+    src.connect(offline.destination);
+    src.start(c.start);
+  }
+  const rendered = await offline.startRendering();
+  return encodeWav(rendered.getChannelData(0), sampleRate);
+}
+
+
 function exactArrayBuffer(bytes: Uint8Array): ArrayBuffer {
   return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
 }
