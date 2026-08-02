@@ -305,10 +305,15 @@ export async function runPipeline(
     },
   });
 
-  // 5. Stable render mode: subtitles are burned in, original audio is copied.
-  // This returns to the pre-FS-error behavior by avoiding heavy FFmpeg audio
-  // mixing, dozens of MP3 inputs, silence cuts and delogo passes in one render.
-  progress("tts", "Mode stable : voix originale conservée…", 1);
+  // 5. Voix off : synthèse de chaque segment + mixage en un seul WAV (1 input).
+  progress("tts", "Génération de la voix off…", 0);
+  let voiceWav: Uint8Array | null = null;
+  try {
+    voiceWav = await composeNarrationWav(segments, duration, progress);
+  } catch {
+    voiceWav = null;
+  }
+
 
   // Escape text for drawtext (per line, newlines added after escaping)
   const esc = (s: string) =>
