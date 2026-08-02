@@ -1,5 +1,5 @@
 import { getFfmpeg, releaseFfmpeg } from "./ffmpeg-client";
-import { transcribeAudio, translateSegments } from "@/lib/ai.functions";
+import { transcribeAudio, translateSegments, synthesizeSpeech } from "@/lib/ai.functions";
 import {
   DEFAULT_MASKS,
   SUBTITLE_PRESETS,
