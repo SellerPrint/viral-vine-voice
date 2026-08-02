@@ -77,16 +77,33 @@ async function composeNarrationWav(
   const decodeCtx = new AudioContext();
   const clips: { buffer: AudioBuffer; start: number; slot: number }[] = [];
 
+  const directionFor = (text: string) => {
+    if (/[!?]{2,}|!/.test(text)) return "excited" as const;
+    if (/\?/.test(text)) return "energetic" as const;
+    if (/\.{3}|…/.test(text)) return "soft" as const;
+    if (/\b(?:attention|important|grave|danger|jamais|mort)\b/i.test(text)) return "serious" as const;
+    return "neutral" as const;
+  };
+
   for (let i = 0; i < usable.length; i++) {
     const s = usable[i];
     progress("tts", `Voix off ${i + 1}/${usable.length}…`, (i + 1) / usable.length);
     try {
+      const slot = Math.max(0.4, s.end - s.start);
+      const wordsPerSecond = (s.textEn.match(/\S+/g)?.length ?? 1) / slot;
+      const speed = Math.min(1.2, Math.max(0.82, wordsPerSecond / 2.6));
       const { audioBase64 } = await synthesizeSpeech({
-        data: { text: s.textEn.trim(), speed: 1.0 },
+        data: {
+          text: s.textEn.trim(),
+          speed,
+          direction: directionFor(s.textFr),
+          previousText: usable[i - 1]?.textEn,
+          nextText: usable[i + 1]?.textEn,
+        },
       });
       const bytes = base64ToBytes(audioBase64);
       const buffer = await decodeCtx.decodeAudioData(exactArrayBuffer(bytes));
-      clips.push({ buffer, start: s.start, slot: Math.max(0.4, s.end - s.start) });
+      clips.push({ buffer, start: s.start, slot });
     } catch {
       // on ignore un segment raté pour ne pas casser tout le rendu
     }
@@ -103,11 +120,12 @@ async function composeNarrationWav(
   for (const c of clips) {
     const src = offline.createBufferSource();
     src.buffer = c.buffer;
-    // accélère légèrement si la voix dépasse la durée du segment (max 1.35x)
+    // Chaque voix commence et finit exactement sur les timestamps de la parole source.
     const ratio = c.buffer.duration / c.slot;
-    src.playbackRate.value = Math.min(1.35, Math.max(1, ratio));
+    src.playbackRate.value = Math.max(0.88, ratio);
     src.connect(offline.destination);
     src.start(c.start);
+    src.stop(c.start + c.slot);
   }
   const rendered = await offline.startRendering();
   return encodeWav(rendered.getChannelData(0), sampleRate);
@@ -318,9 +336,15 @@ export async function runPipeline(
   // Escape text for drawtext (per line, newlines added after escaping)
   const esc = (s: string) =>
     s
+      .replace(/[\r\n\t]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
       .replace(/\\/g, "\\\\")
       .replace(/:/g, "\\:")
       .replace(/,/g, "\\,")
+      .replace(/;/g, "\\;")
+      .replace(/\[/g, "\\[")
+      .replace(/\]/g, "\\]")
       .replace(/'/g, "\u2019")
       .replace(/%/g, "\\%");
 
@@ -355,7 +379,7 @@ export async function runPipeline(
       const raw = preset.uppercase ? s.textEn.toUpperCase() : s.textEn;
       const text = wrapLines(raw, preset.maxCharsPerLine, preset.maxLines)
         .map(esc)
-        .join("\\n");
+        .join("\\\\n");
       const next = visible[i + 1];
       const start = s.start.toFixed(3);
       const rawEnd = next ? Math.min(s.end, next.start - 0.02) : s.end;
