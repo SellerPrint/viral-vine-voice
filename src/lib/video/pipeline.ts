@@ -1,5 +1,5 @@
 import { getFfmpeg, releaseFfmpeg } from "./ffmpeg-client";
-import { transcribeAudio, translateSegments } from "@/lib/ai.functions";
+import { transcribeAudio, translateSegments, synthesizeSpeech } from "@/lib/ai.functions";
 import {
   DEFAULT_MASKS,
   SUBTITLE_PRESETS,
@@ -32,6 +32,87 @@ function base64ToBytes(b64: string) {
 }
 
 const wait = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
+
+/** Encode a mono Float32 track into a 16-bit PCM WAV file. */
+function encodeWav(samples: Float32Array, sampleRate: number): Uint8Array {
+  const bytes = new Uint8Array(44 + samples.length * 2);
+  const view = new DataView(bytes.buffer);
+  const str = (off: number, s: string) => {
+    for (let i = 0; i < s.length; i++) view.setUint8(off + i, s.charCodeAt(i));
+  };
+  str(0, "RIFF");
+  view.setUint32(4, 36 + samples.length * 2, true);
+  str(8, "WAVE");
+  str(12, "fmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * 2, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  str(36, "data");
+  view.setUint32(40, samples.length * 2, true);
+  let off = 44;
+  for (let i = 0; i < samples.length; i++) {
+    const s = Math.max(-1, Math.min(1, samples[i]));
+    view.setInt16(off, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+    off += 2;
+  }
+  return bytes;
+}
+
+/**
+ * Synthesize each translated segment and mix them into a single mono WAV
+ * timeline (one FFmpeg input only → pas d'erreur FS).
+ */
+async function composeNarrationWav(
+  segments: Segment[],
+  duration: number,
+  progress: ProgressCb,
+): Promise<Uint8Array | null> {
+  const usable = segments.filter((s) => s.textEn.trim().length > 1);
+  if (!usable.length || !duration) return null;
+
+  const decodeCtx = new AudioContext();
+  const clips: { buffer: AudioBuffer; start: number; slot: number }[] = [];
+
+  for (let i = 0; i < usable.length; i++) {
+    const s = usable[i];
+    progress("tts", `Voix off ${i + 1}/${usable.length}…`, (i + 1) / usable.length);
+    try {
+      const { audioBase64 } = await synthesizeSpeech({
+        data: { text: s.textEn.trim(), speed: 1.0 },
+      });
+      const bytes = base64ToBytes(audioBase64);
+      const buffer = await decodeCtx.decodeAudioData(exactArrayBuffer(bytes));
+      clips.push({ buffer, start: s.start, slot: Math.max(0.4, s.end - s.start) });
+    } catch {
+      // on ignore un segment raté pour ne pas casser tout le rendu
+    }
+  }
+  decodeCtx.close();
+  if (!clips.length) return null;
+
+  const sampleRate = 24000;
+  const tail = Math.max(
+    duration,
+    ...clips.map((c) => c.start + c.buffer.duration),
+  );
+  const offline = new OfflineAudioContext(1, Math.ceil((tail + 0.5) * sampleRate), sampleRate);
+  for (const c of clips) {
+    const src = offline.createBufferSource();
+    src.buffer = c.buffer;
+    // accélère légèrement si la voix dépasse la durée du segment (max 1.35x)
+    const ratio = c.buffer.duration / c.slot;
+    src.playbackRate.value = Math.min(1.35, Math.max(1, ratio));
+    src.connect(offline.destination);
+    src.start(c.start);
+  }
+  const rendered = await offline.startRendering();
+  return encodeWav(rendered.getChannelData(0), sampleRate);
+}
+
 
 function exactArrayBuffer(bytes: Uint8Array): ArrayBuffer {
   return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
@@ -224,10 +305,15 @@ export async function runPipeline(
     },
   });
 
-  // 5. Stable render mode: subtitles are burned in, original audio is copied.
-  // This returns to the pre-FS-error behavior by avoiding heavy FFmpeg audio
-  // mixing, dozens of MP3 inputs, silence cuts and delogo passes in one render.
-  progress("tts", "Mode stable : voix originale conservée…", 1);
+  // 5. Voix off : synthèse de chaque segment + mixage en un seul WAV (1 input).
+  progress("tts", "Génération de la voix off…", 0);
+  let voiceWav: Uint8Array | null = null;
+  try {
+    voiceWav = await composeNarrationWav(segments, duration, progress);
+  } catch {
+    voiceWav = null;
+  }
+
 
   // Escape text for drawtext (per line, newlines added after escaping)
   const esc = (s: string) =>
@@ -334,19 +420,26 @@ export async function runPipeline(
 
 
   progress("compose", "Assemblage final (ffmpeg)…");
-  // AAC re-encode (instead of stream copy) : beaucoup de vidéos TikTok ont un
-  // audio (opus / pcm / aac exotique) qui rend le MP4 final illisible en copy.
-  const baseArgs = (audioCodec: "aac" | "none") => {
-    const a = [
-      "-y",
-      "-i",
-      inputName,
-      "-filter_complex",
-      filterComplex,
-      "-map",
-      "[vout]",
-    ];
-    if (audioCodec === "aac") {
+  if (voiceWav) {
+    cleanupNames.add("voice.wav");
+    await ff.writeFile("voice.wav", voiceWav);
+  }
+
+  // aac-mix : voix off + audio original atténué. aac : audio original seul.
+  type Mode = "mix" | "voice" | "aac" | "none";
+  const baseArgs = (mode: Mode) => {
+    const a = ["-y", "-i", inputName];
+    if (mode === "mix" || mode === "voice") a.push("-i", "voice.wav");
+    let fc = filterComplex;
+    if (mode === "mix") {
+      fc += `;[0:a]volume=0.14,aresample=44100[a0];[1:a]volume=1.6,aresample=44100[a1];[a0][a1]amix=inputs=2:duration=first:dropout_transition=0,alimiter=limit=0.95[aout]`;
+    } else if (mode === "voice") {
+      fc += `;[1:a]volume=1.6,aresample=44100[aout]`;
+    }
+    a.push("-filter_complex", fc, "-map", "[vout]");
+    if (mode === "mix" || mode === "voice") {
+      a.push("-map", "[aout]", "-c:a", "aac", "-b:a", "128k", "-ar", "44100", "-ac", "2");
+    } else if (mode === "aac") {
       a.push("-map", "0:a?", "-c:a", "aac", "-b:a", "128k", "-ar", "44100", "-ac", "2");
     } else {
       a.push("-an");
@@ -360,6 +453,9 @@ export async function runPipeline(
       "24",
       "-pix_fmt",
       "yuv420p",
+      "-shortest",
+      "-max_muxing_queue_size",
+      "1024",
       "-movflags",
       "+faststart",
       "output.mp4",
@@ -370,7 +466,8 @@ export async function runPipeline(
   cleanupNames.add("output.mp4");
   let outBytes: Uint8Array | null = null;
   let lastError: unknown = null;
-  for (const mode of ["aac", "none"] as const) {
+  const modes: Mode[] = voiceWav ? ["mix", "voice", "aac", "none"] : ["aac", "none"];
+  for (const mode of modes) {
     try {
       await ff.exec(baseArgs(mode));
       const data = (await ff.readFile("output.mp4")) as Uint8Array;
@@ -384,6 +481,7 @@ export async function runPipeline(
       lastError = error;
     }
   }
+
 
   if (!outBytes) {
     throw new Error(
