@@ -420,19 +420,26 @@ export async function runPipeline(
 
 
   progress("compose", "Assemblage final (ffmpeg)…");
-  // AAC re-encode (instead of stream copy) : beaucoup de vidéos TikTok ont un
-  // audio (opus / pcm / aac exotique) qui rend le MP4 final illisible en copy.
-  const baseArgs = (audioCodec: "aac" | "none") => {
-    const a = [
-      "-y",
-      "-i",
-      inputName,
-      "-filter_complex",
-      filterComplex,
-      "-map",
-      "[vout]",
-    ];
-    if (audioCodec === "aac") {
+  if (voiceWav) {
+    cleanupNames.add("voice.wav");
+    await ff.writeFile("voice.wav", voiceWav);
+  }
+
+  // aac-mix : voix off + audio original atténué. aac : audio original seul.
+  type Mode = "mix" | "voice" | "aac" | "none";
+  const baseArgs = (mode: Mode) => {
+    const a = ["-y", "-i", inputName];
+    if (mode === "mix" || mode === "voice") a.push("-i", "voice.wav");
+    let fc = filterComplex;
+    if (mode === "mix") {
+      fc += `;[0:a]volume=0.14,aresample=44100[a0];[1:a]volume=1.6,aresample=44100[a1];[a0][a1]amix=inputs=2:duration=first:dropout_transition=0,alimiter=limit=0.95[aout]`;
+    } else if (mode === "voice") {
+      fc += `;[1:a]volume=1.6,aresample=44100[aout]`;
+    }
+    a.push("-filter_complex", fc, "-map", "[vout]");
+    if (mode === "mix" || mode === "voice") {
+      a.push("-map", "[aout]", "-c:a", "aac", "-b:a", "128k", "-ar", "44100", "-ac", "2");
+    } else if (mode === "aac") {
       a.push("-map", "0:a?", "-c:a", "aac", "-b:a", "128k", "-ar", "44100", "-ac", "2");
     } else {
       a.push("-an");
@@ -446,6 +453,9 @@ export async function runPipeline(
       "24",
       "-pix_fmt",
       "yuv420p",
+      "-shortest",
+      "-max_muxing_queue_size",
+      "1024",
       "-movflags",
       "+faststart",
       "output.mp4",
@@ -456,7 +466,8 @@ export async function runPipeline(
   cleanupNames.add("output.mp4");
   let outBytes: Uint8Array | null = null;
   let lastError: unknown = null;
-  for (const mode of ["aac", "none"] as const) {
+  const modes: Mode[] = voiceWav ? ["mix", "voice", "aac", "none"] : ["aac", "none"];
+  for (const mode of modes) {
     try {
       await ff.exec(baseArgs(mode));
       const data = (await ff.readFile("output.mp4")) as Uint8Array;
@@ -470,6 +481,7 @@ export async function runPipeline(
       lastError = error;
     }
   }
+
 
   if (!outBytes) {
     throw new Error(
