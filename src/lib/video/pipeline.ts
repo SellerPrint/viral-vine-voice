@@ -280,7 +280,8 @@ export async function runPipeline(
     });
     
     // Inject speakerId back into segments
-    segments.forEach((s, i) => { s.speakerId = rawSegments[i].speakerId; });
+    const segs = segments as Array<(typeof segments)[number] & { speakerId?: string }>;
+    segs.forEach((s, i) => { s.speakerId = rawSegments[i]?.speakerId; });
 
     progress("tts", "Génération voix off (AI)…", 0);
     const voiceWav = await composeNarrationWav(segments, duration, progress);
@@ -359,7 +360,7 @@ export async function runPipeline(
     
     await ff.exec(args);
     const out = (await ff.readFile("output.mp4")) as Uint8Array;
-    return { videoBlob: new Blob([out], { type: "video/mp4" }), segments };
+    return { videoBlob: new Blob([exactArrayBuffer(out)], { type: "video/mp4" }), segments };
 
   } finally {
     for (const name of cleanupNames) try { await ff.deleteFile(name); } catch {}
