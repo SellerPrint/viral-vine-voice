@@ -13,6 +13,22 @@ import {
 import { SettingsPanel } from "@/components/SettingsPanel";
 
 export const Route = createFileRoute("/")({
+  head: () => ({
+    meta: [
+      { title: "ViralDub — Doublage vidéo multilingue" },
+      {
+        name: "description",
+        content: "Traduis et double tes vidéos avec sous-titres synchronisés, voix distinctes et rendu MP4 prêt à publier.",
+      },
+      { property: "og:title", content: "ViralDub — Doublage vidéo multilingue" },
+      {
+        property: "og:description",
+        content: "Sous-titres synchronisés, voix distinctes et doublage vidéo multilingue.",
+      },
+      { property: "og:type", content: "website" },
+      { name: "twitter:card", content: "summary" },
+    ],
+  }),
   component: Home,
 });
 
