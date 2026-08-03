@@ -360,7 +360,7 @@ export async function runPipeline(
     
     await ff.exec(args);
     const out = (await ff.readFile("output.mp4")) as Uint8Array;
-    return { videoBlob: new Blob([out], { type: "video/mp4" }), segments };
+    return { videoBlob: new Blob([exactArrayBuffer(out)], { type: "video/mp4" }), segments };
 
   } finally {
     for (const name of cleanupNames) try { await ff.deleteFile(name); } catch {}
