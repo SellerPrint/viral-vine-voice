@@ -14,7 +14,7 @@ export async function requestTranscription(
   form.append("model_id", "scribe_v2");
   form.append("language_code", "fra");
   form.append("tag_audio_events", "false");
-  form.append("diarize", "false");
+  form.append("diarize", "true");
 
   const response = await fetch("https://api.elevenlabs.io/v1/speech-to-text", {
     method: "POST",
@@ -27,7 +27,13 @@ export async function requestTranscription(
   }
   const result = (await response.json()) as {
     text: string;
-    words?: Array<{ text: string; start: number; end: number; type?: string }>;
+    words?: Array<{
+      text: string;
+      start: number;
+      end: number;
+      type?: string;
+      speaker_id?: string;
+    }>;
   };
   return {
     text: result.text,
@@ -114,14 +120,17 @@ ${segments.map((segment, index) => `${index + 1}. [${(segment.end - segment.star
       `La traduction a retourné ${Array.isArray(translations) ? translations.length : 0} segments au lieu de ${segments.length}.`,
     );
   }
-  return translations.map((value) =>
-    String(value)
+  return translations.map((value) => {
+    const clean = String(value)
       .replace(/^\s*(?:\d+[.)-]\s*|[-*•]\s*)/, "")
       .replace(/^(["'“”«»])(.*)\1$/, "$2")
-      .replace(/[\r\n]+/g, " ")
+      .replace(/(?:\\[rn]|\/n|[\r\n])+\s*/gi, " ")
+      .replace(/[*_`#]+/g, "")
       .replace(/\s+/g, " ")
-      .trim(),
-  );
+      .replace(/\s+([,.;:!?])/g, "$1")
+      .trim();
+    return clean.charAt(0).toLocaleUpperCase() + clean.slice(1);
+  });
 }
 
 export async function requestSpeech(

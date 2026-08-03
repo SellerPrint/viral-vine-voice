@@ -16,7 +16,14 @@ export const transcribeAudio = createServerFn({ method: "POST" })
 export const translateSegments = createServerFn({ method: "POST" })
   .inputValidator((input: unknown) =>
     z.object({
-      segments: z.array(z.object({ text: z.string(), start: z.number(), end: z.number() })),
+      segments: z.array(
+        z.object({
+          text: z.string(),
+          start: z.number(),
+          end: z.number(),
+          speakerId: z.string().optional(),
+        }),
+      ),
       targetLanguage: z.string().default("English"),
     }).parse(input),
   )
@@ -31,6 +38,7 @@ export const translateSegments = createServerFn({ method: "POST" })
         end: segment.end,
         textEn: translations[index],
         textFr: segment.text,
+        speakerId: segment.speakerId,
       })),
     };
   });

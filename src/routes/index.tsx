@@ -112,7 +112,7 @@ function Home() {
       setError(e instanceof Error ? e.message : String(e));
       setStep("error");
     }
-  }, [file, preset, overrides, masks]);
+  }, [file, preset, overrides, masks, targetLanguage]);
 
   const reset = () => {
     if (output) URL.revokeObjectURL(output.url);

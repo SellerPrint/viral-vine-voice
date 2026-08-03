@@ -7,8 +7,14 @@ import {
   type PipelineOptions,
 } from "./presets";
 
-export type Word = { text: string; start: number; end: number };
-export type Segment = { start: number; end: number; textFr: string; textEn: string };
+export type Word = { text: string; start: number; end: number; speaker_id?: string };
+export type Segment = {
+  start: number;
+  end: number;
+  textFr: string;
+  textEn: string;
+  speakerId?: string;
+};
 export type VideoInput = { name: string; bytes: Uint8Array };
 
 export type ProgressCb = (step: string, detail?: string, pct?: number) => void;
@@ -85,6 +91,42 @@ async function composeNarrationWav(
     return "neutral" as const;
   };
 
+  const voiceIds = [
+    "EXAVITQu4vr4xnSDxMaL", // Sarah
+    "JBFqnCBsd6RMkjVDRZzb", // George
+    "FGY2WhTYpPnrIDTdsKH5", // Laura
+    "TX3LPaxmHKxFdv7VOQHJ", // Liam
+    "Xb7hH8MSUJpSbSDYk0k2", // Alice
+    "onwK4e9ZLuTAKqWW03F9", // Daniel
+  ];
+  const speakerVoices = new Map<string, string>();
+  const voiceFor = (speakerId?: string) => {
+    const key = speakerId || "speaker-0";
+    const existing = speakerVoices.get(key);
+    if (existing) return existing;
+    const voice = voiceIds[speakerVoices.size % voiceIds.length];
+    speakerVoices.set(key, voice);
+    return voice;
+  };
+
+  const trimSilence = (buffer: AudioBuffer) => {
+    const channel = buffer.getChannelData(0);
+    const threshold = 0.006;
+    let first = 0;
+    let last = channel.length - 1;
+    while (first < last && Math.abs(channel[first]) < threshold) first++;
+    while (last > first && Math.abs(channel[last]) < threshold) last--;
+    const padding = Math.floor(buffer.sampleRate * 0.025);
+    first = Math.max(0, first - padding);
+    last = Math.min(channel.length - 1, last + padding);
+    if (first === 0 && last === channel.length - 1) return buffer;
+    const trimmed = decodeCtx.createBuffer(buffer.numberOfChannels, last - first + 1, buffer.sampleRate);
+    for (let channelIndex = 0; channelIndex < buffer.numberOfChannels; channelIndex++) {
+      trimmed.copyToChannel(buffer.getChannelData(channelIndex).subarray(first, last + 1), channelIndex);
+    }
+    return trimmed;
+  };
+
   for (let i = 0; i < usable.length; i++) {
     const s = usable[i];
     progress("tts", `Voix off ${i + 1}/${usable.length}…`, (i + 1) / usable.length);
@@ -95,6 +137,7 @@ async function composeNarrationWav(
       const { audioBase64 } = await synthesizeSpeech({
         data: {
           text: s.textEn.trim(),
+          voiceId: voiceFor(s.speakerId),
           speed,
           direction: directionFor(s.textFr),
           previousText: usable[i - 1]?.textEn,
@@ -102,7 +145,8 @@ async function composeNarrationWav(
         },
       });
       const bytes = base64ToBytes(audioBase64);
-      const buffer = await decodeCtx.decodeAudioData(exactArrayBuffer(bytes));
+      const decoded = await decodeCtx.decodeAudioData(exactArrayBuffer(bytes));
+      const buffer = trimSilence(decoded);
       clips.push({ buffer, start: s.start, slot });
     } catch {
       // on ignore un segment raté pour ne pas casser tout le rendu
@@ -122,7 +166,7 @@ async function composeNarrationWav(
     src.buffer = c.buffer;
     // Chaque voix commence et finit exactement sur les timestamps de la parole source.
     const ratio = c.buffer.duration / c.slot;
-    src.playbackRate.value = Math.max(0.88, ratio);
+    src.playbackRate.value = Math.min(1.35, Math.max(0.82, ratio));
     src.connect(offline.destination);
     src.start(c.start);
     src.stop(c.start + c.slot);
@@ -182,7 +226,7 @@ export async function readFileBytes(file: File): Promise<Uint8Array> {
 
 /** Group words into sentence-ish segments (~4-8s or on strong punctuation). */
 export function groupWordsToSegments(words: Word[]): { text: string; start: number; end: number }[] {
-  const out: { text: string; start: number; end: number }[] = [];
+  const out: { text: string; start: number; end: number; speakerId?: string }[] = [];
   if (!words.length) return out;
   let cur: Word[] = [];
   const flush = () => {
@@ -191,10 +235,14 @@ export function groupWordsToSegments(words: Word[]): { text: string; start: numb
       text: cur.map((w) => w.text).join(" ").replace(/\s+([,.!?;:])/g, "$1").trim(),
       start: cur[0].start,
       end: cur[cur.length - 1].end,
+      speakerId: cur[0].speaker_id,
     });
     cur = [];
   };
   for (const w of words) {
+    if (cur.length && w.speaker_id && cur[0].speaker_id && w.speaker_id !== cur[0].speaker_id) {
+      flush();
+    }
     cur.push(w);
     const dur = cur[cur.length - 1].end - cur[0].start;
     const endsSentence = /[.!?…]$/.test(w.text);
@@ -318,7 +366,12 @@ export async function runPipeline(
   progress("translate", `Traduction française → ${targetLanguage.name}…`);
   const { segments } = await translateSegments({
     data: {
-      segments: rawSegments.map((s) => ({ text: s.text, start: s.start, end: s.end })),
+      segments: rawSegments.map((s) => ({
+        text: s.text,
+        start: s.start,
+        end: s.end,
+        speakerId: s.speakerId,
+      })),
       targetLanguage: targetLanguage.name,
     },
   });
@@ -375,17 +428,20 @@ export async function runPipeline(
     .sort((a, b) => a.start - b.start);
 
   const drawTextFilters = visible
-    .map((s, i) => {
+    .flatMap((s, i) => {
       const raw = preset.uppercase ? s.textEn.toUpperCase() : s.textEn;
-      const text = wrapLines(raw, preset.maxCharsPerLine, preset.maxLines)
-        .map(esc)
-        .join("\\\\n");
+      const lines = wrapLines(raw, preset.maxCharsPerLine, preset.maxLines);
       const next = visible[i + 1];
       const start = s.start.toFixed(3);
       const rawEnd = next ? Math.min(s.end, next.start - 0.02) : s.end;
       const end = Math.max(rawEnd, s.start + 0.4).toFixed(3);
-      // yAnchor is the vertical center of the text block in the frame (0..1)
-      return `drawtext=fontfile=font.ttf:text='${text}':fontcolor=${preset.fontColor}:fontsize=${preset.fontsize}:line_spacing=${preset.lineSpacing}:box=1:boxcolor=${preset.boxColor}:boxborderw=${preset.boxBorderW}:x=(w-text_w)/2:y=h*${preset.yAnchor.toFixed(3)}-text_h/2:enable='between(t,${start},${end})'`;
+      const lineHeight = preset.fontsize + preset.lineSpacing;
+      const blockHeight = lines.length * lineHeight - preset.lineSpacing;
+      // One drawtext per line avoids FFmpeg's fragile escaped-newline parsing.
+      return lines.map((line, lineIndex) => {
+        const yOffset = lineIndex * lineHeight - blockHeight / 2;
+        return `drawtext=fontfile=font.ttf:text='${esc(line)}':fontcolor=${preset.fontColor}:fontsize=${preset.fontsize}:box=1:boxcolor=${preset.boxColor}:boxborderw=${preset.boxBorderW}:x=(w-text_w)/2:y=h*${preset.yAnchor.toFixed(3)}+${yOffset.toFixed(1)}:enable='between(t,${start},${end})'`;
+      });
     })
     .join(",");
 
@@ -456,7 +512,7 @@ export async function runPipeline(
     if (mode === "mix" || mode === "voice") a.push("-i", "voice.wav");
     let fc = filterComplex;
     if (mode === "mix") {
-      fc += `;[0:a]volume=0.14,aresample=44100[a0];[1:a]volume=1.6,aresample=44100[a1];[a0][a1]amix=inputs=2:duration=first:dropout_transition=0,alimiter=limit=0.95[aout]`;
+      fc += `;[0:a]volume=0.04,aresample=44100[a0];[1:a]volume=1.35,aresample=44100[a1];[a0][a1]amix=inputs=2:duration=first:dropout_transition=0,alimiter=limit=0.95[aout]`;
     } else if (mode === "voice") {
       fc += `;[1:a]volume=1.6,aresample=44100[aout]`;
     }
