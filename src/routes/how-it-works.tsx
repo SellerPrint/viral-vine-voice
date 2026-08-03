@@ -15,6 +15,8 @@ export const Route = createFileRoute("/how-it-works")({
         content:
           "Le pipeline détaillé qui transforme une vidéo TikTok française en version anglaise doublée.",
       },
+      { property: "og:type", content: "website" },
+      { name: "twitter:card", content: "summary" },
     ],
   }),
   component: HowItWorks,

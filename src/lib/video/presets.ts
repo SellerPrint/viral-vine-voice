@@ -19,7 +19,7 @@ export const SUBTITLE_PRESETS: SubtitlePreset[] = [
     name: "TikTok Bold",
     fontsize: 26,
     lineSpacing: 6,
-    uppercase: true,
+    uppercase: false,
     maxCharsPerLine: 22,
     maxLines: 3,
     fontColor: "white",

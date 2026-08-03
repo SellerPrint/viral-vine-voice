@@ -1,7 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
-import { requestSpeech, requestTranscription, requestTranslations } from "./ai.server";
+import { requestSpeech, requestTranscription, requestTranslations, type VoiceDirection } from "./ai.server";
 
 export const transcribeAudio = createServerFn({ method: "POST" })
   .inputValidator((input: unknown) =>
@@ -24,13 +24,14 @@ export const translateSegments = createServerFn({ method: "POST" })
     if (data.segments.length === 0) return { segments: [] };
     const apiKey = process.env.LOVABLE_API_KEY;
     if (!apiKey) throw new Error("LOVABLE_API_KEY missing");
-    const translations = await requestTranslations(apiKey, data.segments, data.targetLanguage);
+    const results = await requestTranslations(apiKey, data.segments, data.targetLanguage);
     return {
       segments: data.segments.map((segment, index) => ({
         start: segment.start,
         end: segment.end,
-        textEn: translations[index],
+        textEn: results[index].text,
         textFr: segment.text,
+        direction: results[index].direction,
       })),
     };
   });

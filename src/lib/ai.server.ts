@@ -14,7 +14,7 @@ export async function requestTranscription(
   form.append("model_id", "scribe_v2");
   form.append("language_code", "fra");
   form.append("tag_audio_events", "false");
-  form.append("diarize", "false");
+  form.append("diarize", "true");
 
   const response = await fetch("https://api.elevenlabs.io/v1/speech-to-text", {
     method: "POST",
@@ -27,13 +27,18 @@ export async function requestTranscription(
   }
   const result = (await response.json()) as {
     text: string;
-    words?: Array<{ text: string; start: number; end: number; type?: string }>;
+    words?: Array<{ text: string; start: number; end: number; type?: string; speaker_id?: string }>;
   };
   return {
     text: result.text,
-    words: (result.words ?? []).filter(
-      (word) => word.type !== "spacing" && word.text.trim().length > 0,
-    ),
+    words: (result.words ?? [])
+      .filter((word) => word.type !== "spacing" && word.text.trim().length > 0)
+      .map((w) => ({
+        text: w.text,
+        start: w.start,
+        end: w.end,
+        speakerId: w.speaker_id || "0",
+      })),
   };
 }
 
@@ -42,11 +47,16 @@ export async function requestTranslations(
   segments: TimedText[],
   targetLanguage: string,
 ) {
-  const prompt = `Translate every numbered French segment into natural, concise ${targetLanguage} for a dubbed short video.
-Preserve emotion, emphasis, punctuation, questions and exclamations. Match the allotted duration; do not add explanations, numbering, quotes, markdown or line breaks inside a translation. Return exactly ${segments.length} translations in the same order.
+  const prompt = `Translate these French segments for a dubbed video in ${targetLanguage}.
+For each segment, provide:
+1. The translation: natural, concise, matching the duration. Use Sentence Case (only first letter and names capitalized).
+2. The emotional direction: one of [neutral, energetic, excited, serious, soft].
+
+Return exactly ${segments.length} JSON objects in the 'results' array.
+Do not include numbering, quotes, or literal newlines in the text.
 
 SEGMENTS:
-${segments.map((segment, index) => `${index + 1}. [${(segment.end - segment.start).toFixed(2)}s] ${segment.text}`).join("\n")}`;
+${segments.map((segment, index) => `[${index + 1}] (${(segment.end - segment.start).toFixed(2)}s): ${segment.text}`).join("\n")}`;
 
   const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
     method: "POST",
@@ -55,11 +65,11 @@ ${segments.map((segment, index) => `${index + 1}. [${(segment.end - segment.star
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      model: "google/gemini-2.5-flash",
+      model: "google/gemini-2.0-flash",
       messages: [
         {
           role: "system",
-          content: `Translate French speech to ${targetLanguage}. Preserve delivery and timing exactly.`,
+          content: `You are an expert video translator. Translate French to ${targetLanguage}. Output valid JSON for the tool.`,
         },
         { role: "user", content: prompt },
       ],
@@ -68,18 +78,25 @@ ${segments.map((segment, index) => `${index + 1}. [${(segment.end - segment.star
           type: "function",
           function: {
             name: "return_translations",
-            description: "Return one clean translation for each source segment.",
+            description: "Return structured translations and prosody directions.",
             parameters: {
               type: "object",
               properties: {
-                translations: {
+                results: {
                   type: "array",
                   minItems: segments.length,
                   maxItems: segments.length,
-                  items: { type: "string" },
+                  items: {
+                    type: "object",
+                    properties: {
+                      translation: { type: "string" },
+                      direction: { enum: ["neutral", "energetic", "excited", "serious", "soft"] },
+                    },
+                    required: ["translation", "direction"],
+                  },
                 },
               },
-              required: ["translations"],
+              required: ["results"],
             },
           },
         },
@@ -91,37 +108,29 @@ ${segments.map((segment, index) => `${index + 1}. [${(segment.end - segment.star
     const error = await response.text();
     throw new Error(`Translation failed (${response.status}): ${error.slice(0, 300)}`);
   }
-  const result = (await response.json()) as {
-    choices?: Array<{
-      message?: { tool_calls?: Array<{ function?: { arguments?: string } }> };
-    }>;
-  };
+  const result = (await response.json()) as any;
   const rawArguments = result.choices?.[0]?.message?.tool_calls?.[0]?.function?.arguments;
   if (!rawArguments) throw new Error("La traduction n'a retourné aucun segment structuré.");
 
-  let parsed: unknown;
+  let parsed: any;
   try {
     parsed = JSON.parse(rawArguments);
   } catch {
-    throw new Error("La réponse de traduction est mal formatée. Réessaie le traitement.");
+    throw new Error("La réponse de traduction est mal formatée.");
   }
-  if (!parsed || typeof parsed !== "object" || !("translations" in parsed)) {
-    throw new Error("La réponse de traduction ne contient pas les sous-titres attendus.");
+  
+  const results = parsed.results;
+  if (!Array.isArray(results) || results.length !== segments.length) {
+    throw new Error(`Attendu ${segments.length} segments, reçu ${results?.length || 0}.`);
   }
-  const translations = (parsed as { translations?: unknown }).translations;
-  if (!Array.isArray(translations) || translations.length !== segments.length) {
-    throw new Error(
-      `La traduction a retourné ${Array.isArray(translations) ? translations.length : 0} segments au lieu de ${segments.length}.`,
-    );
-  }
-  return translations.map((value) =>
-    String(value)
-      .replace(/^\s*(?:\d+[.)-]\s*|[-*•]\s*)/, "")
-      .replace(/^(["'“”«»])(.*)\1$/, "$2")
+
+  return results.map((r: any) => ({
+    text: String(r.translation)
       .replace(/[\r\n]+/g, " ")
       .replace(/\s+/g, " ")
       .trim(),
-  );
+    direction: (r.direction || "neutral") as VoiceDirection,
+  }));
 }
 
 export async function requestSpeech(
@@ -137,11 +146,12 @@ export async function requestSpeech(
 ) {
   const delivery = {
     neutral: { stability: 0.5, style: 0.25 },
-    energetic: { stability: 0.3, style: 0.65 },
+    energetic: { stability: 0.35, style: 0.6 },
     excited: { stability: 0.25, style: 0.8 },
-    serious: { stability: 0.7, style: 0.2 },
-    soft: { stability: 0.65, style: 0.15 },
+    serious: { stability: 0.75, style: 0.15 },
+    soft: { stability: 0.6, style: 0.1 },
   }[input.direction];
+
   const response = await fetch(
     `https://api.elevenlabs.io/v1/text-to-speech/${input.voiceId}?output_format=mp3_44100_128`,
     {
