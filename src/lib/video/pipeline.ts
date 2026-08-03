@@ -280,7 +280,8 @@ export async function runPipeline(
     });
     
     // Inject speakerId back into segments
-    segments.forEach((s, i) => { s.speakerId = rawSegments[i].speakerId; });
+    const segs = segments as Array<(typeof segments)[number] & { speakerId?: string }>;
+    segs.forEach((s, i) => { s.speakerId = rawSegments[i]?.speakerId; });
 
     progress("tts", "Génération voix off (AI)…", 0);
     const voiceWav = await composeNarrationWav(segments, duration, progress);
