@@ -23,7 +23,7 @@ export const Route = createFileRoute("/")({
       { property: "og:title", content: "ViralDub — Doublage vidéo multilingue" },
       {
         property: "og:description",
-        content: "Sous-titres synchronisés, voix distinctes et doublage vidéo multilingue.",
+        content: "Traduis et double tes vidéos avec sous-titres synchronisés, voix distinctes et rendu MP4 prêt à publier.",
       },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary" },

@@ -77,20 +77,24 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "ViralDub — Traduis tes TikToks FR en anglais avec voix off" },
+      { title: "ViralDub — Doublage vidéo multilingue" },
       {
         name: "description",
         content:
-          "Upload une vidéo TikTok française, récupère-la en anglais avec voix off, sous-titres, silences coupés et transitions. 100% dans ton navigateur.",
+          "Traduis et double tes vidéos avec sous-titres synchronisés, voix distinctes et rendu MP4 prêt à publier.",
       },
       { name: "author", content: "ViralDub" },
-      { property: "og:title", content: "ViralDub — TikTok FR → EN avec voix off" },
+      { property: "og:title", content: "ViralDub — Doublage vidéo multilingue" },
       {
         property: "og:description",
-        content: "Traduction, voix off IA et montage automatique de tes TikToks français.",
+        content: "Traduis et double tes vidéos avec sous-titres synchronisés, voix distinctes et rendu MP4 prêt à publier.",
       },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
+      { name: "twitter:title", content: "ViralDub — Doublage vidéo multilingue" },
+      { name: "twitter:description", content: "Traduis et double tes vidéos avec sous-titres synchronisés, voix distinctes et rendu MP4 prêt à publier." },
+      { property: "og:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/5b9c74de-f52c-4e78-ae06-0a6f767cad72/id-preview-72b50954--88ceb58a-2e30-4718-8bf6-8e6a513bdb91.lovable.app-1785764350141.png" },
+      { name: "twitter:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/5b9c74de-f52c-4e78-ae06-0a6f767cad72/id-preview-72b50954--88ceb58a-2e30-4718-8bf6-8e6a513bdb91.lovable.app-1785764350141.png" },
     ],
     links: [
       {
