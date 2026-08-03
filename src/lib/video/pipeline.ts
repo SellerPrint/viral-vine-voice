@@ -225,7 +225,9 @@ export async function readFileBytes(file: File): Promise<Uint8Array> {
 }
 
 /** Group words into sentence-ish segments (~4-8s or on strong punctuation). */
-export function groupWordsToSegments(words: Word[]): { text: string; start: number; end: number }[] {
+export function groupWordsToSegments(
+  words: Word[],
+): { text: string; start: number; end: number; speakerId?: string }[] {
   const out: { text: string; start: number; end: number; speakerId?: string }[] = [];
   if (!words.length) return out;
   let cur: Word[] = [];
