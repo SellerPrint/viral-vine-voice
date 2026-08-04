@@ -303,11 +303,22 @@ export async function runPipeline(
     };
 
     const visible = segments.filter((s) => s.textEn.trim()).sort((a, b) => a.start - b.start);
+
+    // Cover the original subtitle band with the new cards: the new text is
+    // placed right on top of the old zone with an opaque plate behind it.
+    const coverMask = masks.find((m) => m.enabled && (m.id === "bottom" || m.id === "top"));
+    const subYAnchor = coverMask
+      ? Math.min(0.94, Math.max(0.06, coverMask.y + coverMask.h / 2))
+      : preset.yAnchor;
+    const plateColor = preset.boxColor.replace(/@[\d.]+$/, "@0.92");
+    const boxColor = preset.boxColor.replace(/@[\d.]+$/, "@0.95");
+    const boxBorderW = Math.max(preset.boxBorderW, 16);
+
     // Keep translated text out of the filter expression. Apostrophes, colons,
     // commas and line breaks inside an inline `text=` value can split the
     // filter graph and leave output.mp4 missing, which surfaces as ErrnoError.
     const subtitleFiles: string[] = [];
-    const drawTextFilters = visible.map((s, i) => {
+    const drawTextFilters = visible.flatMap((s, i) => {
       const raw = preset.uppercase ? s.textEn.toUpperCase() : s.textEn;
       const wrapped = wrapLines(raw, preset.maxCharsPerLine, preset.maxLines);
       const subtitleFile = `subtitle_${i}.txt`;
@@ -315,8 +326,22 @@ export async function runPipeline(
       const next = visible[i + 1];
       const start = s.start.toFixed(3);
       const end = (next ? Math.min(s.end, next.start - 0.02) : s.end).toFixed(3);
-      return `drawtext=fontfile=font.ttf:textfile=${subtitleFile}:reload=0:fontcolor=${preset.fontColor}:fontsize=${preset.fontsize}:line_spacing=${preset.lineSpacing}:box=1:boxcolor=${preset.boxColor}:boxborderw=${preset.boxBorderW}:x=(w-text_w)/2:y=h*${preset.yAnchor.toFixed(3)}-text_h/2:enable=between(t\\,${start}\\,${end})`;
+      const enable = `enable=between(t\\,${start}\\,${end})`;
+      const filters: string[] = [];
+      if (coverMask) {
+        const py = coverMask.y.toFixed(3);
+        const ph = coverMask.h.toFixed(3);
+        filters.push(
+          `drawbox=x=0:y=h*${py}:w=iw:h=h*${ph}:color=${plateColor}:t=fill:${enable}`,
+        );
+      }
+      filters.push(
+        `drawtext=fontfile=font.ttf:textfile=${subtitleFile}:reload=0:fontcolor=${preset.fontColor}:fontsize=${preset.fontsize}:line_spacing=${preset.lineSpacing}:box=1:boxcolor=${boxColor}:boxborderw=${boxBorderW}:x=(w-text_w)/2:y=h*${subYAnchor.toFixed(3)}-text_h/2:${enable}`,
+      );
+      void wrapped;
+      return filters;
     }).join(",");
+
 
     for (let i = 0; i < subtitleFiles.length; i++) {
       const raw = preset.uppercase ? visible[i].textEn.toUpperCase() : visible[i].textEn;
