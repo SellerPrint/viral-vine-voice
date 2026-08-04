@@ -331,49 +331,111 @@ export async function runPipeline(
     cleanupNames.add("font.ttf");
     await ff.writeFile("font.ttf", ttfBuf);
 
-    const sizeMatch = logs.join("\n").match(/Video:.*?[\s,](\d{2,5})x(\d{2,5})/);
+    const probe = logs.join("\n");
+    const sizeMatch = probe.match(/Video:.*?[\s,](\d{2,5})x(\d{2,5})/);
     const vw = sizeMatch ? +sizeMatch[1] : 0;
     const vh = sizeMatch ? +sizeMatch[2] : 0;
-    const even = (n: number) => Math.max(16, Math.round(n / 2) * 2);
-    const activeMasks = vw && vh ? masks.filter((m) => m.enabled).map((m) => ({
-      w: even(m.w * vw), h: even(m.h * vh), x: even(m.x * vw), y: even(m.y * vh)
-    })).slice(0, 4) : [];
+    const hasAudio = /Stream #\d+:\d+.*: Audio:/.test(probe);
 
-    let fc = "";
-    if (activeMasks.length) {
-      fc = `[0:v]split=${activeMasks.length + 1}[base]${activeMasks.map((_, i) => `[z${i}]`).join("")};`;
-      activeMasks.forEach((m, i) => { fc += `[z${i}]crop=${m.w}:${m.h}:${m.x}:${m.y},boxblur=20:2[b${i}];`; });
-      let prev = "base";
-      activeMasks.forEach((m, i) => {
-        const out = i === activeMasks.length - 1 ? "masked" : `o${i}`;
-        fc += `[${prev}][b${i}]overlay=${m.x}:${m.y}[${out}];`;
-        prev = out;
-      });
-      fc += `[masked]${drawTextFilters || "null"}[vout]`;
-    } else {
-      fc = `[0:v]${drawTextFilters || "null"}[vout]`;
-    }
+    // Even-sized, in-bounds crop rectangles. An out-of-bounds crop makes the
+    // whole filter graph fail with exit code 1.
+    const even = (n: number) => Math.round(n / 2) * 2;
+    const activeMasks = vw && vh
+      ? masks
+          .filter((m) => m.enabled)
+          .map((m) => {
+            const x = Math.min(Math.max(0, even(m.x * vw)), vw - 16);
+            const y = Math.min(Math.max(0, even(m.y * vh)), vh - 16);
+            const w = Math.max(16, Math.min(even(m.w * vw), even(vw - x)));
+            const h = Math.max(16, Math.min(even(m.h * vh), even(vh - y)));
+            return { x, y, w, h };
+          })
+          .filter((m) => m.w >= 16 && m.h >= 16 && m.x + m.w <= vw && m.y + m.h <= vh)
+          .slice(0, 4)
+      : [];
+
+    const buildGraph = (useMasks: boolean, useText: boolean, useVoice: boolean) => {
+      const text = useText && drawTextFilters ? drawTextFilters : "null";
+      let g = "";
+      if (useMasks && activeMasks.length) {
+        g = `[0:v]split=${activeMasks.length + 1}[base]${activeMasks.map((_, i) => `[z${i}]`).join("")};`;
+        activeMasks.forEach((m, i) => { g += `[z${i}]crop=${m.w}:${m.h}:${m.x}:${m.y},boxblur=20:2[b${i}];`; });
+        let prev = "base";
+        activeMasks.forEach((m, i) => {
+          const out = i === activeMasks.length - 1 ? "masked" : `o${i}`;
+          g += `[${prev}][b${i}]overlay=${m.x}:${m.y}[${out}];`;
+          prev = out;
+        });
+        g += `[masked]${text}[vout]`;
+      } else {
+        g = `[0:v]${text}[vout]`;
+      }
+      if (useVoice && voiceWav) {
+        g += hasAudio
+          ? `;[0:a]volume=0.15,aresample=44100[a0];[1:a]volume=1.8,aresample=44100[a1];[a0][a1]amix=inputs=2:duration=first:dropout_transition=0,alimiter=limit=0.9[aout]`
+          : `;[1:a]volume=1.4,aresample=44100[aout]`;
+      } else if (hasAudio) {
+        g += `;[0:a]volume=1,aresample=44100[aout]`;
+      }
+      return g;
+    };
 
     if (voiceWav) {
       cleanupNames.add("voice.wav");
       await ff.writeFile("voice.wav", voiceWav);
-      fc += `;[0:a]volume=0.15,aresample=44100[a0];[1:a]volume=1.8,aresample=44100[a1];[a0][a1]amix=inputs=2:duration=first:dropout_transition=0,alimiter=limit=0.9[aout]`;
-    } else {
-      fc += `;[0:a]volume=1,aresample=44100[aout]`;
     }
 
     progress("compose", "Assemblage final…");
-    const args = ["-y", "-i", inputName];
-    if (voiceWav) args.push("-i", "voice.wav");
-    args.push("-filter_complex", fc, "-map", "[vout]", "-map", "[aout]", "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "128k", "output.mp4");
-    
     cleanupNames.add("output.mp4");
-    const exitCode = await ff.exec(args);
-    if (exitCode !== 0) {
-      throw new Error(`L’assemblage vidéo a échoué (code FFmpeg ${exitCode}). Réduisez les zones de masquage puis réessayez.`);
+
+    const attempts: { masks: boolean; text: boolean; voice: boolean; note: string }[] = [
+      { masks: true, text: true, voice: true, note: "complet" },
+      { masks: false, text: true, voice: true, note: "sans masques" },
+      { masks: false, text: true, voice: false, note: "sans voix off" },
+      { masks: false, text: false, voice: false, note: "vidéo seule" },
+    ];
+
+    let lastLogs = "";
+    let out: Uint8Array | null = null;
+
+    for (const attempt of attempts) {
+      if (attempt.masks && !activeMasks.length) continue;
+      if (attempt.voice && !voiceWav) continue;
+      const fc = buildGraph(attempt.masks, attempt.text, attempt.voice && !!voiceWav);
+      const runLogs: string[] = [];
+      const onLog = ({ message }: { message: string }) => runLogs.push(message);
+      ff.on("log", onLog);
+      const args = ["-y", "-i", inputName];
+      if (attempt.voice && voiceWav) args.push("-i", "voice.wav");
+      args.push("-filter_complex", fc, "-map", "[vout]");
+      if (fc.includes("[aout]")) args.push("-map", "[aout]", "-c:a", "aac", "-b:a", "128k");
+      else args.push("-an");
+      args.push("-c:v", "libx264", "-preset", "ultrafast", "-crf", "23", "-pix_fmt", "yuv420p", "-movflags", "+faststart", "output.mp4");
+
+      let code = 1;
+      try {
+        code = await ff.exec(args);
+      } catch {
+        code = 1;
+      }
+      ff.off("log", onLog);
+      lastLogs = runLogs.slice(-12).join("\n");
+
+      if (code === 0) {
+        try {
+          const bytes = (await ff.readFile("output.mp4")) as Uint8Array;
+          if (bytes.byteLength > 1024) { out = bytes; break; }
+        } catch { /* retry with a simpler graph */ }
+      }
+      progress("compose", `Nouvel essai (${attempt.note})…`);
     }
-    const out = (await ff.readFile("output.mp4")) as Uint8Array;
-    if (out.byteLength < 1024) throw new Error("La vidéo exportée est vide ou incomplète.");
+
+    if (!out) {
+      const detail = lastLogs.match(/(Error|Invalid|failed|No such)[^\n]*/i)?.[0];
+      throw new Error(
+        `L’assemblage vidéo a échoué${detail ? ` : ${detail}` : ""}. Essayez une vidéo plus courte ou désactivez les zones de masquage.`,
+      );
+    }
     return { videoBlob: new Blob([exactArrayBuffer(out)], { type: "video/mp4" }), segments };
 
   } finally {
