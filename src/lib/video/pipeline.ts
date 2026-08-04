@@ -94,7 +94,9 @@ async function composeNarrationWav(
       const slot = Math.max(0.4, s.end - s.start);
       // Heuristic for speed: base is 2.8 words/sec.
       const wordCount = s.textEn.split(/\s+/).length;
-      const targetSpeed = Math.min(1.25, Math.max(0.75, (wordCount / slot) / 2.8));
+      // The server/API accepts at most 1.2. Keep the client in the same range
+      // so a dense segment cannot make the whole narration silently disappear.
+      const targetSpeed = Math.min(1.2, Math.max(0.75, (wordCount / slot) / 2.8));
       
       const { audioBase64 } = await synthesizeSpeech({
         data: {
@@ -286,11 +288,6 @@ export async function runPipeline(
     progress("tts", "Génération voix off (AI)…", 0);
     const voiceWav = await composeNarrationWav(segments, duration, progress);
 
-    // Escape for drawtext. 
-    // FFmpeg drawtext uses \ to escape special chars. \n is a special case.
-    const esc = (s: string) =>
-      s.replace(/[\\':%,;[]/g, (m) => "\\" + m);
-
     const wrapLines = (raw: string, maxChars: number, maxLines: number) => {
       const words = raw.split(/\s+/).filter(Boolean);
       const lines: string[] = [];
@@ -306,15 +303,27 @@ export async function runPipeline(
     };
 
     const visible = segments.filter((s) => s.textEn.trim()).sort((a, b) => a.start - b.start);
+    // Keep translated text out of the filter expression. Apostrophes, colons,
+    // commas and line breaks inside an inline `text=` value can split the
+    // filter graph and leave output.mp4 missing, which surfaces as ErrnoError.
+    const subtitleFiles: string[] = [];
     const drawTextFilters = visible.map((s, i) => {
       const raw = preset.uppercase ? s.textEn.toUpperCase() : s.textEn;
       const wrapped = wrapLines(raw, preset.maxCharsPerLine, preset.maxLines);
-      const text = wrapped.map(esc).join("\\n");
+      const subtitleFile = `subtitle_${i}.txt`;
+      subtitleFiles.push(subtitleFile);
       const next = visible[i + 1];
       const start = s.start.toFixed(3);
       const end = (next ? Math.min(s.end, next.start - 0.02) : s.end).toFixed(3);
-      return `drawtext=fontfile=font.ttf:text='${text}':fontcolor=${preset.fontColor}:fontsize=${preset.fontsize}:line_spacing=${preset.lineSpacing}:box=1:boxcolor=${preset.boxColor}:boxborderw=${preset.boxBorderW}:x=(w-text_w)/2:y=h*${preset.yAnchor.toFixed(3)}-text_h/2:enable='between(t,${start},${end})'`;
+      return `drawtext=fontfile=font.ttf:textfile=${subtitleFile}:reload=0:fontcolor=${preset.fontColor}:fontsize=${preset.fontsize}:line_spacing=${preset.lineSpacing}:box=1:boxcolor=${preset.boxColor}:boxborderw=${preset.boxBorderW}:x=(w-text_w)/2:y=h*${preset.yAnchor.toFixed(3)}-text_h/2:enable=between(t\\,${start}\\,${end})`;
     }).join(",");
+
+    for (let i = 0; i < subtitleFiles.length; i++) {
+      const raw = preset.uppercase ? visible[i].textEn.toUpperCase() : visible[i].textEn;
+      const text = wrapLines(raw, preset.maxCharsPerLine, preset.maxLines).join("\n");
+      cleanupNames.add(subtitleFiles[i]);
+      await ff.writeFile(subtitleFiles[i], new TextEncoder().encode(text));
+    }
 
     progress("compose", "Récupération des polices…");
     const ttfRes = await fetch("https://raw.githubusercontent.com/googlefonts/roboto/main/src/hinted/Roboto-Bold.ttf");
@@ -358,8 +367,13 @@ export async function runPipeline(
     if (voiceWav) args.push("-i", "voice.wav");
     args.push("-filter_complex", fc, "-map", "[vout]", "-map", "[aout]", "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "128k", "output.mp4");
     
-    await ff.exec(args);
+    cleanupNames.add("output.mp4");
+    const exitCode = await ff.exec(args);
+    if (exitCode !== 0) {
+      throw new Error(`L’assemblage vidéo a échoué (code FFmpeg ${exitCode}). Réduisez les zones de masquage puis réessayez.`);
+    }
     const out = (await ff.readFile("output.mp4")) as Uint8Array;
+    if (out.byteLength < 1024) throw new Error("La vidéo exportée est vide ou incomplète.");
     return { videoBlob: new Blob([exactArrayBuffer(out)], { type: "video/mp4" }), segments };
 
   } finally {
