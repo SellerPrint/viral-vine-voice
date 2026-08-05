@@ -425,11 +425,43 @@ export async function runPipeline(
           .slice(0, 4)
       : [];
 
-    const buildGraph = (useMasks: boolean, useText: boolean, useVoice: boolean) => {
-      const text = useText && drawTextFilters ? drawTextFilters : "null";
+    const buildGraph = (useMasks: boolean, useText: boolean, useVoice: boolean, useCuts: boolean) => {
+      const cuts = useCuts && keeps.length > 1;
+      const text = useText ? (cuts ? drawTextFiltersCut : drawTextFilters) || "null" : "null";
       let g = "";
+      let vIn = "0:v";
+      let aIn = "0:a";
+      let voiceIn = "1:a";
+
+      if (cuts) {
+        // Découpe réelle des silences : trim + concat sur vidéo et audio.
+        g += `[0:v]split=${keeps.length}${keeps.map((_, i) => `[cv${i}]`).join("")};`;
+        keeps.forEach((k, i) => {
+          g += `[cv${i}]trim=start=${k.start.toFixed(3)}:end=${k.end.toFixed(3)},setpts=PTS-STARTPTS[tv${i}];`;
+        });
+        g += `${keeps.map((_, i) => `[tv${i}]`).join("")}concat=n=${keeps.length}:v=1:a=0[vcut];`;
+        vIn = "vcut";
+
+        if (hasAudio) {
+          g += `[0:a]asplit=${keeps.length}${keeps.map((_, i) => `[ca${i}]`).join("")};`;
+          keeps.forEach((k, i) => {
+            g += `[ca${i}]atrim=start=${k.start.toFixed(3)}:end=${k.end.toFixed(3)},asetpts=PTS-STARTPTS[ta${i}];`;
+          });
+          g += `${keeps.map((_, i) => `[ta${i}]`).join("")}concat=n=${keeps.length}:v=0:a=1[acut];`;
+          aIn = "acut";
+        }
+        if (useVoice && voiceWav) {
+          g += `[1:a]asplit=${keeps.length}${keeps.map((_, i) => `[cw${i}]`).join("")};`;
+          keeps.forEach((k, i) => {
+            g += `[cw${i}]atrim=start=${k.start.toFixed(3)}:end=${k.end.toFixed(3)},asetpts=PTS-STARTPTS[tw${i}];`;
+          });
+          g += `${keeps.map((_, i) => `[tw${i}]`).join("")}concat=n=${keeps.length}:v=0:a=1[wcut];`;
+          voiceIn = "wcut";
+        }
+      }
+
       if (useMasks && activeMasks.length) {
-        g = `[0:v]split=${activeMasks.length + 1}[base]${activeMasks.map((_, i) => `[z${i}]`).join("")};`;
+        g += `[${vIn}]split=${activeMasks.length + 1}[base]${activeMasks.map((_, i) => `[z${i}]`).join("")};`;
         activeMasks.forEach((m, i) => { g += `[z${i}]crop=${m.w}:${m.h}:${m.x}:${m.y},boxblur=20:2[b${i}];`; });
         let prev = "base";
         activeMasks.forEach((m, i) => {
@@ -439,14 +471,15 @@ export async function runPipeline(
         });
         g += `[masked]${text}[vout]`;
       } else {
-        g = `[0:v]${text}[vout]`;
+        g += `[${vIn}]${text}[vout]`;
       }
+
       if (useVoice && voiceWav) {
         g += hasAudio
-          ? `;[0:a]volume=0.15,aresample=44100[a0];[1:a]volume=1.8,aresample=44100[a1];[a0][a1]amix=inputs=2:duration=first:dropout_transition=0,alimiter=limit=0.9[aout]`
-          : `;[1:a]volume=1.4,aresample=44100[aout]`;
+          ? `;[${aIn}]volume=0.15,aresample=44100[a0];[${voiceIn}]volume=1.8,aresample=44100[a1];[a0][a1]amix=inputs=2:duration=first:dropout_transition=0,alimiter=limit=0.9[aout]`
+          : `;[${voiceIn}]volume=1.4,aresample=44100[aout]`;
       } else if (hasAudio) {
-        g += `;[0:a]volume=1,aresample=44100[aout]`;
+        g += `;[${aIn}]volume=1,aresample=44100[aout]`;
       }
       return g;
     };
@@ -459,11 +492,12 @@ export async function runPipeline(
     progress("compose", "Assemblage final…");
     cleanupNames.add("output.mp4");
 
-    const attempts: { masks: boolean; text: boolean; voice: boolean; note: string }[] = [
-      { masks: true, text: true, voice: true, note: "complet" },
-      { masks: false, text: true, voice: true, note: "sans masques" },
-      { masks: false, text: true, voice: false, note: "sans voix off" },
-      { masks: false, text: false, voice: false, note: "vidéo seule" },
+    const attempts: { masks: boolean; text: boolean; voice: boolean; cuts: boolean; note: string }[] = [
+      { masks: true, text: true, voice: true, cuts: true, note: "complet" },
+      { masks: false, text: true, voice: true, cuts: true, note: "sans masques" },
+      { masks: false, text: true, voice: true, cuts: false, note: "sans coupe des silences" },
+      { masks: false, text: true, voice: false, cuts: false, note: "sans voix off" },
+      { masks: false, text: false, voice: false, cuts: false, note: "vidéo seule" },
     ];
 
     let lastLogs = "";
@@ -472,7 +506,8 @@ export async function runPipeline(
     for (const attempt of attempts) {
       if (attempt.masks && !activeMasks.length) continue;
       if (attempt.voice && !voiceWav) continue;
-      const fc = buildGraph(attempt.masks, attempt.text, attempt.voice && !!voiceWav);
+      if (attempt.cuts && keeps.length < 2) continue;
+      const fc = buildGraph(attempt.masks, attempt.text, attempt.voice && !!voiceWav, attempt.cuts);
       const runLogs: string[] = [];
       const onLog = ({ message }: { message: string }) => runLogs.push(message);
       ff.on("log", onLog);
@@ -500,6 +535,7 @@ export async function runPipeline(
       }
       progress("compose", `Nouvel essai (${attempt.note})…`);
     }
+
 
     if (!out) {
       const detail = lastLogs.match(/(Error|Invalid|failed|No such)[^\n]*/i)?.[0];
