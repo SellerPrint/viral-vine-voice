@@ -167,7 +167,10 @@ export type PipelineOptions = {
   overrides: SubtitleOverrides;
   masks: MaskZone[];
   targetLanguage?: TargetLanguage;
+  /** Couper réellement les silences (défaut: true) */
+  cutSilences?: boolean;
 };
+
 
 export function resolvePreset(preset: SubtitlePreset, o: SubtitleOverrides): SubtitlePreset {
   return { ...preset, ...o };
