@@ -304,6 +304,34 @@ export async function runPipeline(
 
     const visible = segments.filter((s) => s.textEn.trim()).sort((a, b) => a.start - b.start);
 
+    /* ------------------------- coupure des silences ------------------------ */
+    const wantCuts = opts?.cutSilences !== false && duration > 0;
+    // On ne coupe que les silences qui ne recouvrent aucune parole (marge 0.15s)
+    const speechFree = silences.filter(
+      (s) =>
+        s.end - s.start >= 0.55 &&
+        !visible.some((seg) => seg.start - 0.15 < s.end && seg.end + 0.15 > s.start),
+    );
+    const cutList = wantCuts
+      ? speechFree
+          .map((s) => ({ start: s.start + 0.12, end: s.end - 0.12 }))
+          .filter((s) => s.end - s.start > 0.3)
+          .sort((a, b) => b.end - b.start - (a.end - a.start))
+          .slice(0, 10)
+          .sort((a, b) => a.start - b.start)
+      : [];
+    const keeps = cutList.length ? keptIntervals(duration, cutList, 0) : [];
+    const remap = (t: number) => {
+      if (!keeps.length) return t;
+      let acc = 0;
+      for (const k of keeps) {
+        if (t <= k.start) return acc;
+        if (t <= k.end) return acc + (t - k.start);
+        acc += k.end - k.start;
+      }
+      return acc;
+    };
+
     // Cover the original subtitle band with the new cards: the new text is
     // placed right on top of the old zone with an opaque plate behind it.
     const coverMask = masks.find((m) => m.enabled && (m.id === "bottom" || m.id === "top"));
@@ -313,34 +341,52 @@ export async function runPipeline(
     const plateColor = preset.boxColor.replace(/@[\d.]+$/, "@0.92");
     const boxColor = preset.boxColor.replace(/@[\d.]+$/, "@0.95");
     const boxBorderW = Math.max(preset.boxBorderW, 16);
+    const useBox = preset.useBox !== false;
+    const styleBits = [
+      `fontcolor=${preset.fontColor}`,
+      `fontsize=${preset.fontsize}`,
+      `line_spacing=${preset.lineSpacing}`,
+      useBox ? `box=1:boxcolor=${boxColor}:boxborderw=${boxBorderW}` : "box=0",
+      preset.borderW ? `borderw=${preset.borderW}:bordercolor=${preset.borderColor ?? "black"}` : "",
+      preset.shadowColor
+        ? `shadowcolor=${preset.shadowColor}:shadowx=${preset.shadowX ?? 2}:shadowy=${preset.shadowY ?? 2}`
+        : "",
+    ]
+      .filter(Boolean)
+      .join(":");
 
     // Keep translated text out of the filter expression. Apostrophes, colons,
     // commas and line breaks inside an inline `text=` value can split the
     // filter graph and leave output.mp4 missing, which surfaces as ErrnoError.
     const subtitleFiles: string[] = [];
-    const drawTextFilters = visible.flatMap((s, i) => {
-      const raw = preset.uppercase ? s.textEn.toUpperCase() : s.textEn;
-      const wrapped = wrapLines(raw, preset.maxCharsPerLine, preset.maxLines);
-      const subtitleFile = `subtitle_${i}.txt`;
-      subtitleFiles.push(subtitleFile);
-      const next = visible[i + 1];
-      const start = s.start.toFixed(3);
-      const end = (next ? Math.min(s.end, next.start - 0.02) : s.end).toFixed(3);
-      const enable = `enable=between(t\\,${start}\\,${end})`;
-      const filters: string[] = [];
-      if (coverMask) {
-        const py = coverMask.y.toFixed(3);
-        const ph = coverMask.h.toFixed(3);
-        filters.push(
-          `drawbox=x=0:y=h*${py}:w=iw:h=h*${ph}:color=${plateColor}:t=fill:${enable}`,
-        );
-      }
-      filters.push(
-        `drawtext=fontfile=font.ttf:textfile=${subtitleFile}:reload=0:fontcolor=${preset.fontColor}:fontsize=${preset.fontsize}:line_spacing=${preset.lineSpacing}:box=1:boxcolor=${boxColor}:boxborderw=${boxBorderW}:x=(w-text_w)/2:y=h*${subYAnchor.toFixed(3)}-text_h/2:${enable}`,
-      );
-      void wrapped;
-      return filters;
-    }).join(",");
+    const buildTextFilters = (withCuts: boolean) =>
+      visible
+        .flatMap((s, i) => {
+          const subtitleFile = `subtitle_${i}.txt`;
+          if (!withCuts) subtitleFiles.push(subtitleFile);
+          const next = visible[i + 1];
+          const rawEnd = next ? Math.min(s.end, next.start - 0.02) : s.end;
+          const start = (withCuts ? remap(s.start) : s.start).toFixed(3);
+          const end = (withCuts ? remap(rawEnd) : rawEnd).toFixed(3);
+          const enable = `enable=between(t\\,${start}\\,${end})`;
+          const filters: string[] = [];
+          if (coverMask && useBox) {
+            const py = coverMask.y.toFixed(3);
+            const ph = coverMask.h.toFixed(3);
+            filters.push(
+              `drawbox=x=0:y=h*${py}:w=iw:h=h*${ph}:color=${plateColor}:t=fill:${enable}`,
+            );
+          }
+          filters.push(
+            `drawtext=fontfile=font.ttf:textfile=${subtitleFile}:reload=0:${styleBits}:x=(w-text_w)/2:y=h*${subYAnchor.toFixed(3)}-text_h/2:${enable}`,
+          );
+          return filters;
+        })
+        .join(",");
+
+    const drawTextFilters = buildTextFilters(false);
+    const drawTextFiltersCut = keeps.length ? buildTextFilters(true) : drawTextFilters;
+
 
 
     for (let i = 0; i < subtitleFiles.length; i++) {
@@ -379,11 +425,43 @@ export async function runPipeline(
           .slice(0, 4)
       : [];
 
-    const buildGraph = (useMasks: boolean, useText: boolean, useVoice: boolean) => {
-      const text = useText && drawTextFilters ? drawTextFilters : "null";
+    const buildGraph = (useMasks: boolean, useText: boolean, useVoice: boolean, useCuts: boolean) => {
+      const cuts = useCuts && keeps.length > 1;
+      const text = useText ? (cuts ? drawTextFiltersCut : drawTextFilters) || "null" : "null";
       let g = "";
+      let vIn = "0:v";
+      let aIn = "0:a";
+      let voiceIn = "1:a";
+
+      if (cuts) {
+        // Découpe réelle des silences : trim + concat sur vidéo et audio.
+        g += `[0:v]split=${keeps.length}${keeps.map((_, i) => `[cv${i}]`).join("")};`;
+        keeps.forEach((k, i) => {
+          g += `[cv${i}]trim=start=${k.start.toFixed(3)}:end=${k.end.toFixed(3)},setpts=PTS-STARTPTS[tv${i}];`;
+        });
+        g += `${keeps.map((_, i) => `[tv${i}]`).join("")}concat=n=${keeps.length}:v=1:a=0[vcut];`;
+        vIn = "vcut";
+
+        if (hasAudio) {
+          g += `[0:a]asplit=${keeps.length}${keeps.map((_, i) => `[ca${i}]`).join("")};`;
+          keeps.forEach((k, i) => {
+            g += `[ca${i}]atrim=start=${k.start.toFixed(3)}:end=${k.end.toFixed(3)},asetpts=PTS-STARTPTS[ta${i}];`;
+          });
+          g += `${keeps.map((_, i) => `[ta${i}]`).join("")}concat=n=${keeps.length}:v=0:a=1[acut];`;
+          aIn = "acut";
+        }
+        if (useVoice && voiceWav) {
+          g += `[1:a]asplit=${keeps.length}${keeps.map((_, i) => `[cw${i}]`).join("")};`;
+          keeps.forEach((k, i) => {
+            g += `[cw${i}]atrim=start=${k.start.toFixed(3)}:end=${k.end.toFixed(3)},asetpts=PTS-STARTPTS[tw${i}];`;
+          });
+          g += `${keeps.map((_, i) => `[tw${i}]`).join("")}concat=n=${keeps.length}:v=0:a=1[wcut];`;
+          voiceIn = "wcut";
+        }
+      }
+
       if (useMasks && activeMasks.length) {
-        g = `[0:v]split=${activeMasks.length + 1}[base]${activeMasks.map((_, i) => `[z${i}]`).join("")};`;
+        g += `[${vIn}]split=${activeMasks.length + 1}[base]${activeMasks.map((_, i) => `[z${i}]`).join("")};`;
         activeMasks.forEach((m, i) => { g += `[z${i}]crop=${m.w}:${m.h}:${m.x}:${m.y},boxblur=20:2[b${i}];`; });
         let prev = "base";
         activeMasks.forEach((m, i) => {
@@ -393,14 +471,15 @@ export async function runPipeline(
         });
         g += `[masked]${text}[vout]`;
       } else {
-        g = `[0:v]${text}[vout]`;
+        g += `[${vIn}]${text}[vout]`;
       }
+
       if (useVoice && voiceWav) {
         g += hasAudio
-          ? `;[0:a]volume=0.15,aresample=44100[a0];[1:a]volume=1.8,aresample=44100[a1];[a0][a1]amix=inputs=2:duration=first:dropout_transition=0,alimiter=limit=0.9[aout]`
-          : `;[1:a]volume=1.4,aresample=44100[aout]`;
+          ? `;[${aIn}]volume=0.15,aresample=44100[a0];[${voiceIn}]volume=1.8,aresample=44100[a1];[a0][a1]amix=inputs=2:duration=first:dropout_transition=0,alimiter=limit=0.9[aout]`
+          : `;[${voiceIn}]volume=1.4,aresample=44100[aout]`;
       } else if (hasAudio) {
-        g += `;[0:a]volume=1,aresample=44100[aout]`;
+        g += `;[${aIn}]volume=1,aresample=44100[aout]`;
       }
       return g;
     };
@@ -413,11 +492,12 @@ export async function runPipeline(
     progress("compose", "Assemblage final…");
     cleanupNames.add("output.mp4");
 
-    const attempts: { masks: boolean; text: boolean; voice: boolean; note: string }[] = [
-      { masks: true, text: true, voice: true, note: "complet" },
-      { masks: false, text: true, voice: true, note: "sans masques" },
-      { masks: false, text: true, voice: false, note: "sans voix off" },
-      { masks: false, text: false, voice: false, note: "vidéo seule" },
+    const attempts: { masks: boolean; text: boolean; voice: boolean; cuts: boolean; note: string }[] = [
+      { masks: true, text: true, voice: true, cuts: true, note: "complet" },
+      { masks: false, text: true, voice: true, cuts: true, note: "sans masques" },
+      { masks: false, text: true, voice: true, cuts: false, note: "sans coupe des silences" },
+      { masks: false, text: true, voice: false, cuts: false, note: "sans voix off" },
+      { masks: false, text: false, voice: false, cuts: false, note: "vidéo seule" },
     ];
 
     let lastLogs = "";
@@ -426,7 +506,8 @@ export async function runPipeline(
     for (const attempt of attempts) {
       if (attempt.masks && !activeMasks.length) continue;
       if (attempt.voice && !voiceWav) continue;
-      const fc = buildGraph(attempt.masks, attempt.text, attempt.voice && !!voiceWav);
+      if (attempt.cuts && keeps.length < 2) continue;
+      const fc = buildGraph(attempt.masks, attempt.text, attempt.voice && !!voiceWav, attempt.cuts);
       const runLogs: string[] = [];
       const onLog = ({ message }: { message: string }) => runLogs.push(message);
       ff.on("log", onLog);
@@ -454,6 +535,7 @@ export async function runPipeline(
       }
       progress("compose", `Nouvel essai (${attempt.note})…`);
     }
+
 
     if (!out) {
       const detail = lastLogs.match(/(Error|Invalid|failed|No such)[^\n]*/i)?.[0];

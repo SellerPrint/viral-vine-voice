@@ -11,9 +11,86 @@ export type SubtitlePreset = {
   boxBorderW: number;
   /** vertical anchor in the frame, 0 = top, 1 = bottom */
   yAnchor: number;
+  /** CapCut-like styling */
+  useBox?: boolean;
+  borderW?: number;
+  borderColor?: string;
+  shadowColor?: string;
+  shadowX?: number;
+  shadowY?: number;
 };
 
 export const SUBTITLE_PRESETS: SubtitlePreset[] = [
+  {
+    id: "capcut-classic",
+    name: "CapCut Classic",
+    fontsize: 30,
+    lineSpacing: 6,
+    uppercase: false,
+    maxCharsPerLine: 20,
+    maxLines: 2,
+    fontColor: "white",
+    boxColor: "black@0.0",
+    boxBorderW: 0,
+    yAnchor: 0.78,
+    useBox: false,
+    borderW: 5,
+    borderColor: "black",
+    shadowColor: "black@0.6",
+    shadowX: 2,
+    shadowY: 3,
+  },
+  {
+    id: "capcut-pop",
+    name: "CapCut Pop (jaune)",
+    fontsize: 32,
+    lineSpacing: 6,
+    uppercase: true,
+    maxCharsPerLine: 16,
+    maxLines: 2,
+    fontColor: "yellow",
+    boxColor: "black@0.0",
+    boxBorderW: 0,
+    yAnchor: 0.74,
+    useBox: false,
+    borderW: 6,
+    borderColor: "black",
+    shadowColor: "black@0.7",
+    shadowX: 3,
+    shadowY: 4,
+  },
+  {
+    id: "capcut-highlight",
+    name: "CapCut Highlight",
+    fontsize: 28,
+    lineSpacing: 8,
+    uppercase: true,
+    maxCharsPerLine: 18,
+    maxLines: 2,
+    fontColor: "white",
+    boxColor: "#FF0050@0.9",
+    boxBorderW: 14,
+    yAnchor: 0.76,
+    useBox: true,
+    borderW: 2,
+    borderColor: "black",
+  },
+  {
+    id: "capcut-minimal",
+    name: "CapCut Minimal",
+    fontsize: 24,
+    lineSpacing: 5,
+    uppercase: false,
+    maxCharsPerLine: 26,
+    maxLines: 2,
+    fontColor: "white",
+    boxColor: "black@0.55",
+    boxBorderW: 12,
+    yAnchor: 0.82,
+    useBox: true,
+    borderW: 2,
+    borderColor: "black",
+  },
   {
     id: "tiktok-bold",
     name: "TikTok Bold",
@@ -26,32 +103,7 @@ export const SUBTITLE_PRESETS: SubtitlePreset[] = [
     boxColor: "black@0.75",
     boxBorderW: 12,
     yAnchor: 0.78,
-  },
-  {
-    id: "clean-white",
-    name: "Clean White",
-    fontsize: 22,
-    lineSpacing: 4,
-    uppercase: false,
-    maxCharsPerLine: 28,
-    maxLines: 2,
-    fontColor: "white",
-    boxColor: "black@0.55",
-    boxBorderW: 10,
-    yAnchor: 0.82,
-  },
-  {
-    id: "karaoke-yellow",
-    name: "Karaoke Yellow",
-    fontsize: 28,
-    lineSpacing: 5,
-    uppercase: true,
-    maxCharsPerLine: 20,
-    maxLines: 2,
-    fontColor: "yellow",
-    boxColor: "black@0.7",
-    boxBorderW: 14,
-    yAnchor: 0.74,
+    useBox: true,
   },
   {
     id: "minimal-top",
@@ -65,8 +117,10 @@ export const SUBTITLE_PRESETS: SubtitlePreset[] = [
     boxColor: "black@0.45",
     boxBorderW: 8,
     yAnchor: 0.18,
+    useBox: true,
   },
 ];
+
 
 /** Rectangular mask expressed in normalized coords (0..1) of frame. */
 export type MaskZone = {
@@ -113,7 +167,10 @@ export type PipelineOptions = {
   overrides: SubtitleOverrides;
   masks: MaskZone[];
   targetLanguage?: TargetLanguage;
+  /** Couper réellement les silences (défaut: true) */
+  cutSilences?: boolean;
 };
+
 
 export function resolvePreset(preset: SubtitlePreset, o: SubtitleOverrides): SubtitlePreset {
   return { ...preset, ...o };
