@@ -304,6 +304,34 @@ export async function runPipeline(
 
     const visible = segments.filter((s) => s.textEn.trim()).sort((a, b) => a.start - b.start);
 
+    /* ------------------------- coupure des silences ------------------------ */
+    const wantCuts = opts?.cutSilences !== false && duration > 0;
+    // On ne coupe que les silences qui ne recouvrent aucune parole (marge 0.15s)
+    const speechFree = silences.filter(
+      (s) =>
+        s.end - s.start >= 0.55 &&
+        !visible.some((seg) => seg.start - 0.15 < s.end && seg.end + 0.15 > s.start),
+    );
+    const cutList = wantCuts
+      ? speechFree
+          .map((s) => ({ start: s.start + 0.12, end: s.end - 0.12 }))
+          .filter((s) => s.end - s.start > 0.3)
+          .sort((a, b) => b.end - b.start - (a.end - a.start))
+          .slice(0, 10)
+          .sort((a, b) => a.start - b.start)
+      : [];
+    const keeps = cutList.length ? keptIntervals(duration, cutList, 0) : [];
+    const remap = (t: number) => {
+      if (!keeps.length) return t;
+      let acc = 0;
+      for (const k of keeps) {
+        if (t <= k.start) return acc;
+        if (t <= k.end) return acc + (t - k.start);
+        acc += k.end - k.start;
+      }
+      return acc;
+    };
+
     // Cover the original subtitle band with the new cards: the new text is
     // placed right on top of the old zone with an opaque plate behind it.
     const coverMask = masks.find((m) => m.enabled && (m.id === "bottom" || m.id === "top"));
@@ -313,34 +341,52 @@ export async function runPipeline(
     const plateColor = preset.boxColor.replace(/@[\d.]+$/, "@0.92");
     const boxColor = preset.boxColor.replace(/@[\d.]+$/, "@0.95");
     const boxBorderW = Math.max(preset.boxBorderW, 16);
+    const useBox = preset.useBox !== false;
+    const styleBits = [
+      `fontcolor=${preset.fontColor}`,
+      `fontsize=${preset.fontsize}`,
+      `line_spacing=${preset.lineSpacing}`,
+      useBox ? `box=1:boxcolor=${boxColor}:boxborderw=${boxBorderW}` : "box=0",
+      preset.borderW ? `borderw=${preset.borderW}:bordercolor=${preset.borderColor ?? "black"}` : "",
+      preset.shadowColor
+        ? `shadowcolor=${preset.shadowColor}:shadowx=${preset.shadowX ?? 2}:shadowy=${preset.shadowY ?? 2}`
+        : "",
+    ]
+      .filter(Boolean)
+      .join(":");
 
     // Keep translated text out of the filter expression. Apostrophes, colons,
     // commas and line breaks inside an inline `text=` value can split the
     // filter graph and leave output.mp4 missing, which surfaces as ErrnoError.
     const subtitleFiles: string[] = [];
-    const drawTextFilters = visible.flatMap((s, i) => {
-      const raw = preset.uppercase ? s.textEn.toUpperCase() : s.textEn;
-      const wrapped = wrapLines(raw, preset.maxCharsPerLine, preset.maxLines);
-      const subtitleFile = `subtitle_${i}.txt`;
-      subtitleFiles.push(subtitleFile);
-      const next = visible[i + 1];
-      const start = s.start.toFixed(3);
-      const end = (next ? Math.min(s.end, next.start - 0.02) : s.end).toFixed(3);
-      const enable = `enable=between(t\\,${start}\\,${end})`;
-      const filters: string[] = [];
-      if (coverMask) {
-        const py = coverMask.y.toFixed(3);
-        const ph = coverMask.h.toFixed(3);
-        filters.push(
-          `drawbox=x=0:y=h*${py}:w=iw:h=h*${ph}:color=${plateColor}:t=fill:${enable}`,
-        );
-      }
-      filters.push(
-        `drawtext=fontfile=font.ttf:textfile=${subtitleFile}:reload=0:fontcolor=${preset.fontColor}:fontsize=${preset.fontsize}:line_spacing=${preset.lineSpacing}:box=1:boxcolor=${boxColor}:boxborderw=${boxBorderW}:x=(w-text_w)/2:y=h*${subYAnchor.toFixed(3)}-text_h/2:${enable}`,
-      );
-      void wrapped;
-      return filters;
-    }).join(",");
+    const buildTextFilters = (withCuts: boolean) =>
+      visible
+        .flatMap((s, i) => {
+          const subtitleFile = `subtitle_${i}.txt`;
+          if (!withCuts) subtitleFiles.push(subtitleFile);
+          const next = visible[i + 1];
+          const rawEnd = next ? Math.min(s.end, next.start - 0.02) : s.end;
+          const start = (withCuts ? remap(s.start) : s.start).toFixed(3);
+          const end = (withCuts ? remap(rawEnd) : rawEnd).toFixed(3);
+          const enable = `enable=between(t\\,${start}\\,${end})`;
+          const filters: string[] = [];
+          if (coverMask && useBox) {
+            const py = coverMask.y.toFixed(3);
+            const ph = coverMask.h.toFixed(3);
+            filters.push(
+              `drawbox=x=0:y=h*${py}:w=iw:h=h*${ph}:color=${plateColor}:t=fill:${enable}`,
+            );
+          }
+          filters.push(
+            `drawtext=fontfile=font.ttf:textfile=${subtitleFile}:reload=0:${styleBits}:x=(w-text_w)/2:y=h*${subYAnchor.toFixed(3)}-text_h/2:${enable}`,
+          );
+          return filters;
+        })
+        .join(",");
+
+    const drawTextFilters = buildTextFilters(false);
+    const drawTextFiltersCut = keeps.length ? buildTextFilters(true) : drawTextFilters;
+
 
 
     for (let i = 0; i < subtitleFiles.length; i++) {
