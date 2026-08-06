@@ -181,3 +181,41 @@ export async function requestSpeech(
   }
   return Buffer.from(await response.arrayBuffer()).toString("base64");
 }
+
+/**
+ * Voix clonée via ai33.pro (API compatible OpenAI /v1/audio/speech).
+ * `voiceId` correspond à l'identifiant de la voix clonée du compte.
+ */
+export async function requestClonedSpeech(
+  apiKey: string,
+  input: { text: string; voiceId: string; speed: number; direction: VoiceDirection },
+) {
+  const tone = {
+    neutral: "Speak naturally.",
+    energetic: "Speak with energy and drive.",
+    excited: "Speak excitedly, with high enthusiasm.",
+    serious: "Speak seriously and calmly.",
+    soft: "Speak softly and gently.",
+  }[input.direction];
+
+  const response = await fetch("https://api.ai33.pro/v1/audio/speech", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: "tts-1-hd",
+      input: input.text,
+      voice: input.voiceId,
+      instructions: tone,
+      speed: input.speed,
+      response_format: "mp3",
+    }),
+  });
+  if (!response.ok) {
+    const error = await response.text();
+    throw new Error(`ai33.pro TTS failed (${response.status}): ${error.slice(0, 300)}`);
+  }
+  return Buffer.from(await response.arrayBuffer()).toString("base64");
+}

@@ -162,6 +162,8 @@ export const TARGET_LANGUAGES: TargetLanguage[] = [
   { code: "tr", label: "🇹🇷 Turc", name: "Turkish" },
 ];
 
+export type TtsProvider = "elevenlabs" | "ai33";
+
 export type PipelineOptions = {
   preset: SubtitlePreset;
   overrides: SubtitleOverrides;
@@ -169,7 +171,16 @@ export type PipelineOptions = {
   targetLanguage?: TargetLanguage;
   /** Couper réellement les silences (défaut: true) */
   cutSilences?: boolean;
+  /** Affichage des sous-titres mot par mot (défaut: true) */
+  wordByWord?: boolean;
+  /** Supprimer totalement l'audio d'origine (défaut: true) */
+  removeOriginalAudio?: boolean;
+  /** Moteur de synthèse vocale */
+  ttsProvider?: TtsProvider;
+  /** Identifiant de la voix clonée (ai33.pro) */
+  clonedVoiceId?: string;
 };
+
 
 
 export function resolvePreset(preset: SubtitlePreset, o: SubtitleOverrides): SubtitlePreset {

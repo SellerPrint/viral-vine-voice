@@ -7,14 +7,32 @@ import {
   type SubtitleOverrides,
   type SubtitlePreset,
   type TargetLanguage,
+  type TtsProvider,
 } from "@/lib/video/presets";
 import { detectMaskZones } from "@/lib/video/detect";
+
+export type RenderOptions = {
+  wordByWord: boolean;
+  removeOriginalAudio: boolean;
+  cutSilences: boolean;
+  ttsProvider: TtsProvider;
+  clonedVoiceId: string;
+};
+
+export const DEFAULT_RENDER_OPTIONS: RenderOptions = {
+  wordByWord: true,
+  removeOriginalAudio: true,
+  cutSilences: true,
+  ttsProvider: "elevenlabs",
+  clonedVoiceId: "",
+};
 
 type Change = {
   preset: SubtitlePreset;
   overrides: SubtitleOverrides;
   masks: MaskZone[];
   targetLanguage: TargetLanguage;
+  options: RenderOptions;
 };
 
 type Props = {
@@ -23,10 +41,19 @@ type Props = {
   overrides: SubtitleOverrides;
   masks: MaskZone[];
   targetLanguage: TargetLanguage;
+  options: RenderOptions;
   onChange: (v: Change) => void;
 };
 
-export function SettingsPanel({ file, preset, overrides, masks, targetLanguage, onChange }: Props) {
+export function SettingsPanel({
+  file,
+  preset,
+  overrides,
+  masks,
+  targetLanguage,
+  options,
+  onChange,
+}: Props) {
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [videoBlob, setVideoBlob] = useState<Blob | null>(null);
   const [dims, setDims] = useState<{ w: number; h: number } | null>(null);
@@ -45,7 +72,9 @@ export function SettingsPanel({ file, preset, overrides, masks, targetLanguage, 
   }, [file]);
 
   const update = (patch: Partial<Change>) =>
-    onChange({ preset, overrides, masks, targetLanguage, ...patch });
+    onChange({ preset, overrides, masks, targetLanguage, options, ...patch });
+  const setOption = <K extends keyof RenderOptions>(key: K, value: RenderOptions[K]) =>
+    update({ options: { ...options, [key]: value } });
 
   const effective = { ...preset, ...overrides };
 
@@ -69,6 +98,55 @@ export function SettingsPanel({ file, preset, overrides, masks, targetLanguage, 
 
   return (
     <div className="mt-6 space-y-6 rounded-2xl border border-border bg-background/40 p-5">
+      <div>
+        <h3 className="font-display text-lg font-bold">Montage & audio</h3>
+        <div className="mt-3 space-y-2">
+          {([
+            ["wordByWord", "Sous-titres mot par mot"],
+            ["removeOriginalAudio", "Supprimer l'audio d'origine"],
+            ["cutSilences", "Couper les scènes silencieuses"],
+          ] as const).map(([key, label]) => (
+            <label key={key} className="flex items-center gap-3 text-sm">
+              <input
+                type="checkbox"
+                checked={options[key]}
+                onChange={(e) => setOption(key, e.target.checked)}
+                className="h-4 w-4 accent-primary"
+              />
+              <span>{label}</span>
+            </label>
+          ))}
+        </div>
+
+        <p className="mt-4 text-xs font-medium text-muted-foreground">Moteur de voix off</p>
+        <div className="mt-2 flex flex-wrap gap-2">
+          {([
+            ["elevenlabs", "Voix IA (ElevenLabs)"],
+            ["ai33", "Voix clonée (ai33.pro)"],
+          ] as const).map(([value, label]) => (
+            <button
+              key={value}
+              onClick={() => setOption("ttsProvider", value)}
+              className={`rounded-full border px-3 py-1.5 text-xs transition ${
+                options.ttsProvider === value
+                  ? "border-primary bg-primary/10 text-foreground"
+                  : "border-border text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        {options.ttsProvider === "ai33" && (
+          <input
+            value={options.clonedVoiceId}
+            onChange={(e) => setOption("clonedVoiceId", e.target.value)}
+            placeholder="ID de ta voix clonée ai33.pro"
+            className="mt-3 w-full rounded-xl border border-border bg-background/60 px-3 py-2 text-sm outline-none focus:border-primary"
+          />
+        )}
+      </div>
+
       <div>
         <h3 className="font-display text-lg font-bold">Langue finale</h3>
         <p className="mt-1 text-xs text-muted-foreground">

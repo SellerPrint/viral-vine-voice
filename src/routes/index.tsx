@@ -10,7 +10,7 @@ import {
   type SubtitlePreset,
   type TargetLanguage,
 } from "@/lib/video/presets";
-import { SettingsPanel } from "@/components/SettingsPanel";
+import { DEFAULT_RENDER_OPTIONS, SettingsPanel, type RenderOptions } from "@/components/SettingsPanel";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -66,6 +66,7 @@ function Home() {
   const [overrides, setOverrides] = useState<SubtitleOverrides>({});
   const [masks, setMasks] = useState<MaskZone[]>(DEFAULT_MASKS);
   const [targetLanguage, setTargetLanguage] = useState<TargetLanguage>(TARGET_LANGUAGES[0]);
+  const [renderOptions, setRenderOptions] = useState<RenderOptions>(DEFAULT_RENDER_OPTIONS);
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   const handleFile = async (f: File | null) => {
@@ -115,7 +116,17 @@ function Home() {
           if (d !== undefined) setDetail(d);
           if (p !== undefined) setPct(p);
         },
-        { preset, overrides, masks, targetLanguage },
+        {
+          preset,
+          overrides,
+          masks,
+          targetLanguage,
+          wordByWord: renderOptions.wordByWord,
+          removeOriginalAudio: renderOptions.removeOriginalAudio,
+          cutSilences: renderOptions.cutSilences,
+          ttsProvider: renderOptions.ttsProvider,
+          clonedVoiceId: renderOptions.clonedVoiceId,
+        },
       );
       const url = URL.createObjectURL(res.videoBlob);
       // Free the raw input bytes now that rendering is done.
@@ -128,7 +139,7 @@ function Home() {
       setError(e instanceof Error ? e.message : String(e));
       setStep("error");
     }
-  }, [file, preset, overrides, masks, targetLanguage]);
+  }, [file, preset, overrides, masks, targetLanguage, renderOptions]);
 
   const reset = () => {
     if (output) URL.revokeObjectURL(output.url);
@@ -239,11 +250,13 @@ function Home() {
                     overrides={overrides}
                     masks={masks}
                     targetLanguage={targetLanguage}
+                    options={renderOptions}
                     onChange={(v) => {
                       setPreset(v.preset);
                       setOverrides(v.overrides);
                       setMasks(v.masks);
                       if (v.targetLanguage) setTargetLanguage(v.targetLanguage);
+                      if (v.options) setRenderOptions(v.options);
                     }}
                   />
                 )}
