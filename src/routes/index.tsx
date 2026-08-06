@@ -250,11 +250,13 @@ function Home() {
                     overrides={overrides}
                     masks={masks}
                     targetLanguage={targetLanguage}
+                    options={renderOptions}
                     onChange={(v) => {
                       setPreset(v.preset);
                       setOverrides(v.overrides);
                       setMasks(v.masks);
                       if (v.targetLanguage) setTargetLanguage(v.targetLanguage);
+                      if (v.options) setRenderOptions(v.options);
                     }}
                   />
                 )}
