@@ -444,7 +444,10 @@ export async function runPipeline(
     const sizeMatch = probe.match(/Video:.*?[\s,](\d{2,5})x(\d{2,5})/);
     const vw = sizeMatch ? +sizeMatch[1] : 0;
     const vh = sizeMatch ? +sizeMatch[2] : 0;
-    const hasAudio = /Stream #\d+:\d+.*: Audio:/.test(probe);
+    const sourceHasAudio = /Stream #\d+:\d+.*: Audio:/.test(probe);
+    // Suppression totale de l'audio d'origine (défaut) : seule la voix off reste.
+    const dropOriginalAudio = opts?.removeOriginalAudio !== false;
+    const hasAudio = sourceHasAudio && !dropOriginalAudio;
 
     // Even-sized, in-bounds crop rectangles. An out-of-bounds crop makes the
     // whole filter graph fail with exit code 1.
