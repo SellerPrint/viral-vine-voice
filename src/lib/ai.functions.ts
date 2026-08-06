@@ -1,7 +1,13 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
-import { requestSpeech, requestTranscription, requestTranslations, type VoiceDirection } from "./ai.server";
+import {
+  requestClonedSpeech,
+  requestSpeech,
+  requestTranscription,
+  requestTranslations,
+  type VoiceDirection,
+} from "./ai.server";
 
 export const transcribeAudio = createServerFn({ method: "POST" })
   .inputValidator((input: unknown) =>
@@ -45,9 +51,21 @@ export const synthesizeSpeech = createServerFn({ method: "POST" })
       direction: z.enum(["neutral", "energetic", "excited", "serious", "soft"]).default("neutral"),
       previousText: z.string().optional(),
       nextText: z.string().optional(),
+      provider: z.enum(["elevenlabs", "ai33"]).default("elevenlabs"),
     }).parse(input),
   )
   .handler(async ({ data }) => {
+    if (data.provider === "ai33") {
+      const ai33Key = process.env.AI33_API_KEY;
+      if (!ai33Key) throw new Error("Clé API ai33.pro manquante (AI33_API_KEY)");
+      const audioBase64 = await requestClonedSpeech(ai33Key, {
+        text: data.text,
+        voiceId: data.voiceId,
+        speed: data.speed,
+        direction: data.direction,
+      });
+      return { audioBase64 };
+    }
     const apiKey = process.env.ELEVENLABS_API_KEY;
     if (!apiKey) throw new Error("ElevenLabs is not connected");
     const audioBase64 = await requestSpeech(apiKey, data);
