@@ -358,16 +358,55 @@ export async function runPipeline(
     // Keep translated text out of the filter expression. Apostrophes, colons,
     // commas and line breaks inside an inline `text=` value can split the
     // filter graph and leave output.mp4 missing, which surfaces as ErrnoError.
-    const subtitleFiles: string[] = [];
-    const buildTextFilters = (withCuts: boolean) =>
-      visible
-        .flatMap((s, i) => {
-          const subtitleFile = `subtitle_${i}.txt`;
-          if (!withCuts) subtitleFiles.push(subtitleFile);
+
+    /* ---------------------- découpage mot par mot ---------------------- */
+    type Cue = { text: string; start: number; end: number };
+    const wordByWord = opts?.wordByWord !== false;
+
+    const buildCues = (): Cue[] => {
+      const cues: Cue[] = [];
+      visible.forEach((s, i) => {
+        const next = visible[i + 1];
+        const segEnd = next ? Math.min(s.end, next.start - 0.02) : s.end;
+        const span = Math.max(0.2, segEnd - s.start);
+        const words = s.textEn.trim().split(/\s+/).filter(Boolean);
+        if (!words.length) return;
+        if (!wordByWord) {
+          cues.push({ text: s.textEn.trim(), start: s.start, end: segEnd });
+          return;
+        }
+        // Répartition proportionnelle à la longueur des mots.
+        const weights = words.map((w) => Math.max(2, w.length));
+        const total = weights.reduce((a, b) => a + b, 0);
+        let t = s.start;
+        words.forEach((w, wi) => {
+          const dur = (weights[wi] / total) * span;
+          cues.push({ text: w, start: t, end: Math.min(segEnd, t + dur) });
+          t += dur;
+        });
+      });
+      // Sécurité : trop de filtres ferait exploser le graphe FFmpeg.
+      if (cues.length > 320) {
+        return visible.map((s, i) => {
           const next = visible[i + 1];
-          const rawEnd = next ? Math.min(s.end, next.start - 0.02) : s.end;
-          const start = (withCuts ? remap(s.start) : s.start).toFixed(3);
-          const end = (withCuts ? remap(rawEnd) : rawEnd).toFixed(3);
+          return {
+            text: s.textEn.trim(),
+            start: s.start,
+            end: next ? Math.min(s.end, next.start - 0.02) : s.end,
+          };
+        });
+      }
+      return cues;
+    };
+
+    const cues = buildCues().filter((c) => c.end - c.start > 0.04);
+    const subtitleFiles = cues.map((_, i) => `subtitle_${i}.txt`);
+
+    const buildTextFilters = (withCuts: boolean) =>
+      cues
+        .flatMap((c, i) => {
+          const start = (withCuts ? remap(c.start) : c.start).toFixed(3);
+          const end = (withCuts ? remap(c.end) : c.end).toFixed(3);
           const enable = `enable=between(t\\,${start}\\,${end})`;
           const filters: string[] = [];
           if (coverMask && useBox) {
@@ -378,7 +417,7 @@ export async function runPipeline(
             );
           }
           filters.push(
-            `drawtext=fontfile=font.ttf:textfile=${subtitleFile}:reload=0:${styleBits}:x=(w-text_w)/2:y=h*${subYAnchor.toFixed(3)}-text_h/2:${enable}`,
+            `drawtext=fontfile=font.ttf:textfile=${subtitleFiles[i]}:reload=0:${styleBits}:x=(w-text_w)/2:y=h*${subYAnchor.toFixed(3)}-text_h/2:${enable}`,
           );
           return filters;
         })
@@ -387,14 +426,13 @@ export async function runPipeline(
     const drawTextFilters = buildTextFilters(false);
     const drawTextFiltersCut = keeps.length ? buildTextFilters(true) : drawTextFilters;
 
-
-
     for (let i = 0; i < subtitleFiles.length; i++) {
-      const raw = preset.uppercase ? visible[i].textEn.toUpperCase() : visible[i].textEn;
+      const raw = preset.uppercase ? cues[i].text.toUpperCase() : cues[i].text;
       const text = wrapLines(raw, preset.maxCharsPerLine, preset.maxLines).join("\n");
       cleanupNames.add(subtitleFiles[i]);
       await ff.writeFile(subtitleFiles[i], new TextEncoder().encode(text));
     }
+
 
     progress("compose", "Récupération des polices…");
     const ttfRes = await fetch("https://raw.githubusercontent.com/googlefonts/roboto/main/src/hinted/Roboto-Bold.ttf");
