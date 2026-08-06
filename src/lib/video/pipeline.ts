@@ -80,6 +80,7 @@ async function composeNarrationWav(
   segments: Segment[],
   duration: number,
   progress: ProgressCb,
+  voice?: { provider: "elevenlabs" | "ai33"; clonedVoiceId?: string },
 ): Promise<Uint8Array | null> {
   const usable = segments.filter((s) => s.textEn.trim().length > 1);
   if (!usable.length || !duration) return null;
@@ -103,7 +104,11 @@ async function composeNarrationWav(
           text: s.textEn.trim(),
           speed: targetSpeed,
           direction: s.direction || "neutral",
-          voiceId: SPEAKER_VOICES[s.speakerId || "0"] || SPEAKER_VOICES["0"],
+          provider: voice?.provider ?? "elevenlabs",
+          voiceId:
+            voice?.provider === "ai33"
+              ? (voice.clonedVoiceId || "").trim() || "alloy"
+              : SPEAKER_VOICES[s.speakerId || "0"] || SPEAKER_VOICES["0"],
           previousText: usable[i - 1]?.textEn,
           nextText: usable[i + 1]?.textEn,
         },
@@ -286,7 +291,10 @@ export async function runPipeline(
     segs.forEach((s, i) => { s.speakerId = rawSegments[i]?.speakerId; });
 
     progress("tts", "Génération voix off (AI)…", 0);
-    const voiceWav = await composeNarrationWav(segments, duration, progress);
+    const voiceWav = await composeNarrationWav(segments, duration, progress, {
+      provider: opts?.ttsProvider ?? "elevenlabs",
+      clonedVoiceId: opts?.clonedVoiceId,
+    });
 
     const wrapLines = (raw: string, maxChars: number, maxLines: number) => {
       const words = raw.split(/\s+/).filter(Boolean);
