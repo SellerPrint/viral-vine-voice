@@ -15,6 +15,7 @@ export type RenderOptions = {
   wordByWord: boolean;
   removeOriginalAudio: boolean;
   cutSilences: boolean;
+  mirror: boolean;
   ttsProvider: TtsProvider;
   clonedVoiceId: string;
 };
@@ -23,6 +24,7 @@ export const DEFAULT_RENDER_OPTIONS: RenderOptions = {
   wordByWord: true,
   removeOriginalAudio: true,
   cutSilences: true,
+  mirror: false,
   ttsProvider: "elevenlabs",
   clonedVoiceId: "",
 };
@@ -105,6 +107,7 @@ export function SettingsPanel({
             ["wordByWord", "Sous-titres mot par mot"],
             ["removeOriginalAudio", "Supprimer l'audio d'origine"],
             ["cutSilences", "Couper les scènes silencieuses"],
+            ["mirror", "Effet miroir (flip horizontal)"],
           ] as const).map(([key, label]) => (
             <label key={key} className="flex items-center gap-3 text-sm">
               <input

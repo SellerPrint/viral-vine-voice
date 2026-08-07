@@ -124,6 +124,7 @@ function Home() {
           wordByWord: renderOptions.wordByWord,
           removeOriginalAudio: renderOptions.removeOriginalAudio,
           cutSilences: renderOptions.cutSilences,
+          mirror: renderOptions.mirror,
           ttsProvider: renderOptions.ttsProvider,
           clonedVoiceId: renderOptions.clonedVoiceId,
         },
