@@ -314,21 +314,22 @@ export async function runPipeline(
 
     /* ------------------------- coupure des silences ------------------------ */
     const wantCuts = opts?.cutSilences !== false && duration > 0;
-    // On ne coupe que les silences qui ne recouvrent aucune parole (marge 0.15s)
+    // On ne coupe que les silences qui ne recouvrent aucune parole (marge 0.1s)
     const speechFree = silences.filter(
       (s) =>
-        s.end - s.start >= 0.55 &&
-        !visible.some((seg) => seg.start - 0.15 < s.end && seg.end + 0.15 > s.start),
+        s.end - s.start >= 0.35 &&
+        !visible.some((seg) => seg.start - 0.1 < s.end && seg.end + 0.1 > s.start),
     );
     const cutList = wantCuts
       ? speechFree
-          .map((s) => ({ start: s.start + 0.12, end: s.end - 0.12 }))
-          .filter((s) => s.end - s.start > 0.3)
+          .map((s) => ({ start: s.start + 0.08, end: s.end - 0.08 }))
+          .filter((s) => s.end - s.start > 0.2)
           .sort((a, b) => b.end - b.start - (a.end - a.start))
-          .slice(0, 10)
+          .slice(0, 40)
           .sort((a, b) => a.start - b.start)
       : [];
     const keeps = cutList.length ? keptIntervals(duration, cutList, 0) : [];
+
     const remap = (t: number) => {
       if (!keeps.length) return t;
       let acc = 0;
@@ -474,6 +475,8 @@ export async function runPipeline(
           .slice(0, 4)
       : [];
 
+    const mirror = opts?.mirror === true;
+
     const buildGraph = (useMasks: boolean, useText: boolean, useVoice: boolean, useCuts: boolean) => {
       const cuts = useCuts && keeps.length > 1;
       const text = useText ? (cuts ? drawTextFiltersCut : drawTextFilters) || "null" : "null";
@@ -482,9 +485,14 @@ export async function runPipeline(
       let aIn = "0:a";
       let voiceIn = "1:a";
 
+      if (mirror) {
+        g += `[0:v]hflip[vflip];`;
+        vIn = "vflip";
+      }
+
       if (cuts) {
         // Découpe réelle des silences : trim + concat sur vidéo et audio.
-        g += `[0:v]split=${keeps.length}${keeps.map((_, i) => `[cv${i}]`).join("")};`;
+        g += `[${vIn}]split=${keeps.length}${keeps.map((_, i) => `[cv${i}]`).join("")};`;
         keeps.forEach((k, i) => {
           g += `[cv${i}]trim=start=${k.start.toFixed(3)}:end=${k.end.toFixed(3)},setpts=PTS-STARTPTS[tv${i}];`;
         });
@@ -523,6 +531,7 @@ export async function runPipeline(
         g += `[${vIn}]${text}[vout]`;
       }
 
+
       if (useVoice && voiceWav) {
         g += hasAudio
           ? `;[${aIn}]volume=0.15,aresample=44100[a0];[${voiceIn}]volume=1.8,aresample=44100[a1];[a0][a1]amix=inputs=2:duration=first:dropout_transition=0,alimiter=limit=0.9[aout]`
@@ -544,10 +553,12 @@ export async function runPipeline(
     const attempts: { masks: boolean; text: boolean; voice: boolean; cuts: boolean; note: string }[] = [
       { masks: true, text: true, voice: true, cuts: true, note: "complet" },
       { masks: false, text: true, voice: true, cuts: true, note: "sans masques" },
+      { masks: false, text: true, voice: false, cuts: true, note: "coupes prioritaires" },
       { masks: false, text: true, voice: true, cuts: false, note: "sans coupe des silences" },
       { masks: false, text: true, voice: false, cuts: false, note: "sans voix off" },
       { masks: false, text: false, voice: false, cuts: false, note: "vidéo seule" },
     ];
+
 
     let lastLogs = "";
     let out: Uint8Array | null = null;

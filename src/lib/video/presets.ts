@@ -24,8 +24,8 @@ export const SUBTITLE_PRESETS: SubtitlePreset[] = [
   {
     id: "capcut-classic",
     name: "CapCut Classic",
-    fontsize: 30,
-    lineSpacing: 6,
+    fontsize: 105,
+    lineSpacing: 18,
     uppercase: false,
     maxCharsPerLine: 20,
     maxLines: 2,
@@ -34,7 +34,7 @@ export const SUBTITLE_PRESETS: SubtitlePreset[] = [
     boxBorderW: 0,
     yAnchor: 0.78,
     useBox: false,
-    borderW: 5,
+    borderW: 10,
     borderColor: "black",
     shadowColor: "black@0.6",
     shadowX: 2,
@@ -43,8 +43,8 @@ export const SUBTITLE_PRESETS: SubtitlePreset[] = [
   {
     id: "capcut-pop",
     name: "CapCut Pop (jaune)",
-    fontsize: 32,
-    lineSpacing: 6,
+    fontsize: 112,
+    lineSpacing: 18,
     uppercase: true,
     maxCharsPerLine: 16,
     maxLines: 2,
@@ -53,7 +53,7 @@ export const SUBTITLE_PRESETS: SubtitlePreset[] = [
     boxBorderW: 0,
     yAnchor: 0.74,
     useBox: false,
-    borderW: 6,
+    borderW: 12,
     borderColor: "black",
     shadowColor: "black@0.7",
     shadowX: 3,
@@ -62,8 +62,8 @@ export const SUBTITLE_PRESETS: SubtitlePreset[] = [
   {
     id: "capcut-highlight",
     name: "CapCut Highlight",
-    fontsize: 28,
-    lineSpacing: 8,
+    fontsize: 98,
+    lineSpacing: 24,
     uppercase: true,
     maxCharsPerLine: 18,
     maxLines: 2,
@@ -72,14 +72,14 @@ export const SUBTITLE_PRESETS: SubtitlePreset[] = [
     boxBorderW: 14,
     yAnchor: 0.76,
     useBox: true,
-    borderW: 2,
+    borderW: 4,
     borderColor: "black",
   },
   {
     id: "capcut-minimal",
     name: "CapCut Minimal",
-    fontsize: 24,
-    lineSpacing: 5,
+    fontsize: 84,
+    lineSpacing: 15,
     uppercase: false,
     maxCharsPerLine: 26,
     maxLines: 2,
@@ -88,14 +88,14 @@ export const SUBTITLE_PRESETS: SubtitlePreset[] = [
     boxBorderW: 12,
     yAnchor: 0.82,
     useBox: true,
-    borderW: 2,
+    borderW: 4,
     borderColor: "black",
   },
   {
     id: "tiktok-bold",
     name: "TikTok Bold",
-    fontsize: 26,
-    lineSpacing: 6,
+    fontsize: 91,
+    lineSpacing: 18,
     uppercase: false,
     maxCharsPerLine: 22,
     maxLines: 3,
@@ -108,8 +108,8 @@ export const SUBTITLE_PRESETS: SubtitlePreset[] = [
   {
     id: "minimal-top",
     name: "Minimal Top",
-    fontsize: 20,
-    lineSpacing: 4,
+    fontsize: 70,
+    lineSpacing: 12,
     uppercase: false,
     maxCharsPerLine: 32,
     maxLines: 2,
@@ -179,6 +179,8 @@ export type PipelineOptions = {
   ttsProvider?: TtsProvider;
   /** Identifiant de la voix clonée (ai33.pro) */
   clonedVoiceId?: string;
+  /** Effet miroir (flip horizontal) pour éviter la détection de doublon */
+  mirror?: boolean;
 };
 
 
