@@ -553,10 +553,12 @@ export async function runPipeline(
     const attempts: { masks: boolean; text: boolean; voice: boolean; cuts: boolean; note: string }[] = [
       { masks: true, text: true, voice: true, cuts: true, note: "complet" },
       { masks: false, text: true, voice: true, cuts: true, note: "sans masques" },
+      { masks: false, text: false, voice: true, cuts: true, note: "coupes prioritaires" },
       { masks: false, text: true, voice: true, cuts: false, note: "sans coupe des silences" },
       { masks: false, text: true, voice: false, cuts: false, note: "sans voix off" },
       { masks: false, text: false, voice: false, cuts: false, note: "vidéo seule" },
     ];
+
 
     let lastLogs = "";
     let out: Uint8Array | null = null;
