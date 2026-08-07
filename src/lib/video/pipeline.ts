@@ -475,6 +475,8 @@ export async function runPipeline(
           .slice(0, 4)
       : [];
 
+    const mirror = opts?.mirror === true;
+
     const buildGraph = (useMasks: boolean, useText: boolean, useVoice: boolean, useCuts: boolean) => {
       const cuts = useCuts && keeps.length > 1;
       const text = useText ? (cuts ? drawTextFiltersCut : drawTextFilters) || "null" : "null";
@@ -483,9 +485,14 @@ export async function runPipeline(
       let aIn = "0:a";
       let voiceIn = "1:a";
 
+      if (mirror) {
+        g += `[0:v]hflip[vflip];`;
+        vIn = "vflip";
+      }
+
       if (cuts) {
         // Découpe réelle des silences : trim + concat sur vidéo et audio.
-        g += `[0:v]split=${keeps.length}${keeps.map((_, i) => `[cv${i}]`).join("")};`;
+        g += `[${vIn}]split=${keeps.length}${keeps.map((_, i) => `[cv${i}]`).join("")};`;
         keeps.forEach((k, i) => {
           g += `[cv${i}]trim=start=${k.start.toFixed(3)}:end=${k.end.toFixed(3)},setpts=PTS-STARTPTS[tv${i}];`;
         });
@@ -523,6 +530,7 @@ export async function runPipeline(
       } else {
         g += `[${vIn}]${text}[vout]`;
       }
+
 
       if (useVoice && voiceWav) {
         g += hasAudio
