@@ -314,21 +314,22 @@ export async function runPipeline(
 
     /* ------------------------- coupure des silences ------------------------ */
     const wantCuts = opts?.cutSilences !== false && duration > 0;
-    // On ne coupe que les silences qui ne recouvrent aucune parole (marge 0.15s)
+    // On ne coupe que les silences qui ne recouvrent aucune parole (marge 0.1s)
     const speechFree = silences.filter(
       (s) =>
-        s.end - s.start >= 0.55 &&
-        !visible.some((seg) => seg.start - 0.15 < s.end && seg.end + 0.15 > s.start),
+        s.end - s.start >= 0.35 &&
+        !visible.some((seg) => seg.start - 0.1 < s.end && seg.end + 0.1 > s.start),
     );
     const cutList = wantCuts
       ? speechFree
-          .map((s) => ({ start: s.start + 0.12, end: s.end - 0.12 }))
-          .filter((s) => s.end - s.start > 0.3)
+          .map((s) => ({ start: s.start + 0.08, end: s.end - 0.08 }))
+          .filter((s) => s.end - s.start > 0.2)
           .sort((a, b) => b.end - b.start - (a.end - a.start))
-          .slice(0, 10)
+          .slice(0, 40)
           .sort((a, b) => a.start - b.start)
       : [];
     const keeps = cutList.length ? keptIntervals(duration, cutList, 0) : [];
+
     const remap = (t: number) => {
       if (!keeps.length) return t;
       let acc = 0;
