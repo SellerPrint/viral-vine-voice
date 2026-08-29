@@ -39,3 +39,6 @@ coverage
 .env
 .env.*
 !.env.example
+
+# Sortie de build Vercel
+.vercel

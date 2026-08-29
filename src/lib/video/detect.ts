@@ -35,8 +35,11 @@ export async function detectMaskZones(file: File | Blob): Promise<MaskZone[]> {
     // 4x4 grid activity for corner logos
     const grid = new Float32Array(16);
 
+    let sampled = 0;
     for (const t of samples) {
-      await seek(video, Math.min(t, duration - 0.05));
+      // Une image qu'on n'a pas pu atteindre est ignorée, pas bloquante.
+      if (!(await seek(video, Math.min(t, duration - 0.05)))) continue;
+      sampled++;
       ctx.drawImage(video, 0, 0, W, H);
       const img = ctx.getImageData(0, 0, W, H).data;
       // grayscale + simple horizontal edge
@@ -58,6 +61,9 @@ export async function detectMaskZones(file: File | Blob): Promise<MaskZone[]> {
         rowAct[y] += rowSum;
       }
     }
+
+    // Aucune image exploitable : pas de suggestion plutôt qu'une suggestion fausse.
+    if (sampled === 0) return [];
 
     // normalize
     const rowMax = Math.max(...rowAct);
@@ -124,13 +130,37 @@ export async function detectMaskZones(file: File | Blob): Promise<MaskZone[]> {
   }
 }
 
-function seek(video: HTMLVideoElement, t: number) {
-  return new Promise<void>((resolve) => {
-    const onSeeked = () => {
+/** Délai au-delà duquel on abandonne une image plutôt que de figer l'analyse. */
+const SEEK_TIMEOUT_MS = 3000;
+
+/**
+ * Se positionne sur une image, avec abandon au bout de `SEEK_TIMEOUT_MS`.
+ *
+ * L'événement `seeked` peut ne jamais arriver (codec exotique, onglet en
+ * arrière-plan, fichier partiellement lisible). Sans délai maximal, la
+ * promesse ne se résolvait jamais et l'interface restait figée sur l'analyse,
+ * sans erreur ni possibilité d'annuler.
+ *
+ * Résout `false` en cas d'abandon : l'échantillon est ignoré et la détection
+ * continue avec les images restantes.
+ */
+function seek(video: HTMLVideoElement, t: number): Promise<boolean> {
+  return new Promise<boolean>((resolve) => {
+    let done = false;
+    const finish = (ok: boolean) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
       video.removeEventListener("seeked", onSeeked);
-      resolve();
+      video.removeEventListener("error", onError);
+      resolve(ok);
     };
+    const onSeeked = () => finish(true);
+    const onError = () => finish(false);
+    const timer = setTimeout(() => finish(false), SEEK_TIMEOUT_MS);
+
     video.addEventListener("seeked", onSeeked);
+    video.addEventListener("error", onError);
     video.currentTime = t;
   });
 }
