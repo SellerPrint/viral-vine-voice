@@ -49,13 +49,13 @@
   --card-foreground: oklch(0.98 0.005 285);
   --popover: oklch(0.19 0.025 285);
   --popover-foreground: oklch(0.98 0.005 285);
-  --primary: oklch(0.68 0.28 5);      /* TikTok-ish pink #FF0050 */
+  --primary: oklch(0.68 0.28 5); /* TikTok-ish pink #FF0050 */
   --primary-foreground: oklch(0.99 0 0);
   --secondary: oklch(0.24 0.03 285);
   --secondary-foreground: oklch(0.98 0.005 285);
   --muted: oklch(0.22 0.02 285);
   --muted-foreground: oklch(0.72 0.02 285);
-  --accent: oklch(0.82 0.18 195);     /* TikTok cyan #00F2EA */
+  --accent: oklch(0.82 0.18 195); /* TikTok cyan #00F2EA */
   --accent-foreground: oklch(0.15 0.02 285);
   --destructive: oklch(0.63 0.22 25);
   --destructive-foreground: oklch(0.99 0 0);
@@ -70,29 +70,47 @@
   * {
     border-color: var(--color-border);
   }
-  html, body {
+  html,
+  body {
     background: var(--color-background);
     color: var(--color-foreground);
     font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
   }
-  h1, h2, h3, h4 {
+  h1,
+  h2,
+  h3,
+  h4 {
     font-family: var(--font-display);
     letter-spacing: -0.02em;
   }
 }
 
 @utility glow-pink {
-  box-shadow: 0 0 0 1px oklch(0.68 0.28 5 / 0.4), 0 20px 60px -20px oklch(0.68 0.28 5 / 0.5);
+  box-shadow:
+    0 0 0 1px oklch(0.68 0.28 5 / 0.4),
+    0 20px 60px -20px oklch(0.68 0.28 5 / 0.5);
 }
 @utility glow-cyan {
-  box-shadow: 0 0 0 1px oklch(0.82 0.18 195 / 0.4), 0 20px 60px -20px oklch(0.82 0.18 195 / 0.4);
+  box-shadow:
+    0 0 0 1px oklch(0.82 0.18 195 / 0.4),
+    0 20px 60px -20px oklch(0.82 0.18 195 / 0.4);
 }
 @utility bg-grad-brand {
-  background-image: linear-gradient(135deg, oklch(0.68 0.28 5) 0%, oklch(0.72 0.24 320) 50%, oklch(0.82 0.18 195) 100%);
+  background-image: linear-gradient(
+    135deg,
+    oklch(0.68 0.28 5) 0%,
+    oklch(0.72 0.24 320) 50%,
+    oklch(0.82 0.18 195) 100%
+  );
 }
 @utility text-grad-brand {
-  background-image: linear-gradient(135deg, oklch(0.82 0.18 195) 0%, oklch(0.85 0.16 300) 50%, oklch(0.75 0.28 5) 100%);
+  background-image: linear-gradient(
+    135deg,
+    oklch(0.82 0.18 195) 0%,
+    oklch(0.85 0.16 300) 50%,
+    oklch(0.75 0.28 5) 100%
+  );
   background-clip: text;
   -webkit-background-clip: text;
   color: transparent;

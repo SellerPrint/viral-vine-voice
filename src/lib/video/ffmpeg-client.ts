@@ -1,10 +1,14 @@
 import type { FFmpeg as FFmpegType } from "@ffmpeg/ffmpeg";
 
+// Le cœur FFmpeg est résolu depuis les dépendances du projet et servi par
+// Vite, plutôt que téléchargé depuis un CDN tiers à l'exécution : version
+// épinglée au lockfile, fonctionnement hors ligne, et pas de point de panne
+// externe dans le chemin critique.
+import coreUrl from "@ffmpeg/core?url";
+import wasmUrl from "@ffmpeg/core/wasm?url";
+
 let instance: FFmpegType | null = null;
 let loading: Promise<FFmpegType> | null = null;
-
-const CORE_VERSION = "0.12.6";
-const CORE_BASE = `https://unpkg.com/@ffmpeg/core@${CORE_VERSION}/dist/esm`;
 
 export async function getFfmpeg(onLog?: (m: string) => void, onProgress?: (p: number) => void) {
   if (typeof window === "undefined") {
@@ -12,23 +16,28 @@ export async function getFfmpeg(onLog?: (m: string) => void, onProgress?: (p: nu
   }
   if (instance) return instance;
   if (loading) return loading;
+
   loading = (async () => {
     const [{ FFmpeg }, { toBlobURL }] = await Promise.all([
       import("@ffmpeg/ffmpeg"),
       import("@ffmpeg/util"),
     ]);
+
     const ff = new FFmpeg();
     ff.on("log", ({ message }) => {
-      if (onLog) onLog(message);
-      // eslint-disable-next-line no-console
-      console.log("[ffmpeg]", message);
+      onLog?.(message);
+      if (import.meta.env.DEV) console.debug("[ffmpeg]", message);
     });
-    if (onProgress) ff.on("progress", ({ progress }) => onProgress(Math.max(0, Math.min(1, progress))));
+    if (onProgress) {
+      ff.on("progress", ({ progress }) => onProgress(Math.max(0, Math.min(1, progress))));
+    }
+
     const [coreURL, wasmURL] = await Promise.all([
-      toBlobURL(`${CORE_BASE}/ffmpeg-core.js`, "text/javascript"),
-      toBlobURL(`${CORE_BASE}/ffmpeg-core.wasm`, "application/wasm"),
+      toBlobURL(coreUrl, "text/javascript"),
+      toBlobURL(wasmUrl, "application/wasm"),
     ]);
     await ff.load({ coreURL, wasmURL });
+
     instance = ff;
     return ff;
   })().catch((error) => {
@@ -36,9 +45,17 @@ export async function getFfmpeg(onLog?: (m: string) => void, onProgress?: (p: nu
     instance = null;
     throw error;
   });
+
   return loading;
 }
 
+/**
+ * Libère le worker et le tas WebAssembly.
+ *
+ * Emscripten ne rend jamais sa mémoire au système : sans terminaison
+ * explicite, le tas grossit à chaque rendu (souvent 1 à 2 Go pour une vidéo
+ * de 60 Mo) jusqu'à faire planter l'onglet, en particulier sur mobile.
+ */
 export function releaseFfmpeg() {
   if (!instance) {
     loading = null;
@@ -47,7 +64,8 @@ export function releaseFfmpeg() {
   try {
     instance.terminate();
   } catch {
-    // ignore termination errors; the goal is to drop the WASM worker/memory.
+    // Peu importe l'échec de terminaison : l'objectif est de lâcher la
+    // référence pour que le worker et sa mémoire soient collectés.
   }
   instance = null;
   loading = null;

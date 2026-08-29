@@ -1,6 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { readFileBytes, runPipeline, type Segment, type VideoInput } from "@/lib/video/pipeline";
+import { releaseFfmpeg } from "@/lib/video/ffmpeg-client";
 import {
   DEFAULT_MASKS,
   SUBTITLE_PRESETS,
@@ -10,7 +11,10 @@ import {
   type SubtitlePreset,
   type TargetLanguage,
 } from "@/lib/video/presets";
-import { DEFAULT_RENDER_OPTIONS, SettingsPanel, type RenderOptions } from "@/components/SettingsPanel";
+import { DEFAULT_SOURCE_LANGUAGE, type SourceLanguage } from "@/lib/languages";
+import { useTurnstile } from "@/hooks/use-turnstile";
+import { SettingsPanel } from "@/components/SettingsPanel";
+import { DEFAULT_RENDER_OPTIONS, type RenderOptions } from "@/lib/video/render-options";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -18,15 +22,18 @@ export const Route = createFileRoute("/")({
       { title: "ViralDub — Doublage vidéo multilingue" },
       {
         name: "description",
-        content: "Traduis et double tes vidéos avec sous-titres synchronisés, voix distinctes et rendu MP4 prêt à publier.",
+        content:
+          "Traduis et double tes vidéos avec sous-titres synchronisés, voix distinctes et rendu MP4 prêt à publier.",
       },
       { property: "og:title", content: "ViralDub — Doublage vidéo multilingue" },
       {
         property: "og:description",
-        content: "Traduis et double tes vidéos avec sous-titres synchronisés, voix distinctes et rendu MP4 prêt à publier.",
+        content:
+          "Traduis et double tes vidéos avec sous-titres synchronisés, voix distinctes et rendu MP4 prêt à publier.",
       },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary" },
+      { property: "og:locale", content: "fr_FR" },
     ],
   }),
   component: Home,
@@ -48,9 +55,9 @@ const STEPS: { key: StepKey; label: string }[] = [
   { key: "ffmpeg", label: "Chargement du moteur vidéo" },
   { key: "extract", label: "Extraction de l'audio" },
   { key: "silence", label: "Détection des silences" },
-  { key: "transcribe", label: "Transcription française" },
-  { key: "translate", label: "Traduction FR → EN" },
-  { key: "tts", label: "Voix off anglaise (ElevenLabs)" },
+  { key: "transcribe", label: "Transcription de la source" },
+  { key: "translate", label: "Traduction" },
+  { key: "tts", label: "Génération de la voix off" },
   { key: "compose", label: "Montage & rendu final" },
 ];
 
@@ -59,19 +66,42 @@ function Home() {
   const [step, setStep] = useState<StepKey>("idle");
   const [detail, setDetail] = useState("");
   const [pct, setPct] = useState(0);
-  const [output, setOutput] = useState<{ url: string; segments: Segment[] } | null>(null);
+  const [output, setOutput] = useState<{
+    url: string;
+    segments: Segment[];
+    warnings: string[];
+  } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copying, setCopying] = useState(false);
   const [preset, setPreset] = useState<SubtitlePreset>(SUBTITLE_PRESETS[0]);
   const [overrides, setOverrides] = useState<SubtitleOverrides>({});
   const [masks, setMasks] = useState<MaskZone[]>(DEFAULT_MASKS);
   const [targetLanguage, setTargetLanguage] = useState<TargetLanguage>(TARGET_LANGUAGES[0]);
+  const [sourceLanguage, setSourceLanguage] = useState<SourceLanguage>(DEFAULT_SOURCE_LANGUAGE);
   const [renderOptions, setRenderOptions] = useState<RenderOptions>(DEFAULT_RENDER_OPTIONS);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+  const turnstile = useTurnstile();
+
+  // Libère le tas WebAssembly et le blob de sortie au démontage : sans cela,
+  // la mémoire du worker ffmpeg reste allouée pour toute la session.
+  useEffect(() => {
+    return () => {
+      abortRef.current?.abort();
+      releaseFfmpeg();
+    };
+  }, []);
+
+  const clearOutput = useCallback(() => {
+    setOutput((previous) => {
+      if (previous) URL.revokeObjectURL(previous.url);
+      return null;
+    });
+  }, []);
 
   const handleFile = async (f: File | null) => {
     setError(null);
-    setOutput(null);
+    clearOutput();
     if (!f) return setFile(null);
     const looksVideo =
       f.type.startsWith("video/") || /\.(mp4|mov|m4v|webm|mkv|avi|3gp)$/i.test(f.name);
@@ -104,10 +134,15 @@ function Home() {
   const start = useCallback(async () => {
     if (!file) return;
     setError(null);
-    setOutput(null);
+    clearOutput();
     setPct(0);
+
+    const controller = new AbortController();
+    abortRef.current = controller;
+
     const bytes = file.bytes;
     const name = file.name;
+
     try {
       const res = await runPipeline(
         { name, bytes },
@@ -120,7 +155,10 @@ function Home() {
           preset,
           overrides,
           masks,
+          sourceLanguage,
           targetLanguage,
+          signal: controller.signal,
+          turnstileToken: turnstile.token,
           wordByWord: renderOptions.wordByWord,
           removeOriginalAudio: renderOptions.removeOriginalAudio,
           cutSilences: renderOptions.cutSilences,
@@ -129,23 +167,52 @@ function Home() {
           clonedVoiceId: renderOptions.clonedVoiceId,
         },
       );
+
       const url = URL.createObjectURL(res.videoBlob);
-      // Free the raw input bytes now that rendering is done.
+      // Libère les octets bruts de l'entrée, le rendu est terminé.
       setFile(null);
-      setOutput({ url, segments: res.segments });
+      setOutput({ url, segments: res.segments, warnings: res.warnings });
       setStep("done");
       setPct(1);
     } catch (e) {
-      console.error(e);
-      setError(e instanceof Error ? e.message : String(e));
-      setStep("error");
+      if (controller.signal.aborted) {
+        setStep("idle");
+        setDetail("");
+        setPct(0);
+      } else {
+        console.error(e);
+        setError(e instanceof Error ? e.message : String(e));
+        setStep("error");
+      }
+    } finally {
+      abortRef.current = null;
+      // Un jeton Turnstile n'est valable qu'une fois côté Cloudflare.
+      turnstile.reset();
+      // Rend le tas WebAssembly : Emscripten ne le restitue jamais seul et
+      // l'onglet finit par manquer de mémoire au bout de quelques rendus.
+      releaseFfmpeg();
     }
-  }, [file, preset, overrides, masks, targetLanguage, renderOptions]);
+  }, [
+    file,
+    preset,
+    overrides,
+    masks,
+    sourceLanguage,
+    targetLanguage,
+    renderOptions,
+    clearOutput,
+    turnstile,
+  ]);
+
+  const cancel = useCallback(() => {
+    abortRef.current?.abort();
+    setDetail("Annulation…");
+  }, []);
 
   const reset = () => {
-    if (output) URL.revokeObjectURL(output.url);
+    abortRef.current?.abort();
+    clearOutput();
     setFile(null);
-    setOutput(null);
     setStep("idle");
     setDetail("");
     setPct(0);
@@ -220,7 +287,9 @@ function Home() {
                         …
                       </div>
                       <p className="mt-4 font-display text-xl font-semibold">Copie de la vidéo…</p>
-                      <p className="mt-1 text-sm text-muted-foreground">Garde cette page ouverte.</p>
+                      <p className="mt-1 text-sm text-muted-foreground">
+                        Garde cette page ouverte.
+                      </p>
                     </>
                   ) : !file ? (
                     <>
@@ -250,28 +319,47 @@ function Home() {
                     preset={preset}
                     overrides={overrides}
                     masks={masks}
+                    sourceLanguage={sourceLanguage}
                     targetLanguage={targetLanguage}
                     options={renderOptions}
                     onChange={(v) => {
                       setPreset(v.preset);
                       setOverrides(v.overrides);
                       setMasks(v.masks);
+                      if (v.sourceLanguage) setSourceLanguage(v.sourceLanguage);
                       if (v.targetLanguage) setTargetLanguage(v.targetLanguage);
                       if (v.options) setRenderOptions(v.options);
                     }}
                   />
                 )}
 
-
+                {turnstile.enabled && file && !running && (
+                  <div className="mt-6">
+                    <div ref={turnstile.containerRef} />
+                    {turnstile.failed && (
+                      <p className="mt-2 text-xs text-destructive">
+                        La vérification anti-robot n'a pas pu se charger. Recharge la page.
+                      </p>
+                    )}
+                  </div>
+                )}
 
                 <div className="mt-6 flex flex-wrap items-center gap-3">
                   <button
                     onClick={start}
-                    disabled={!file || running}
+                    disabled={!file || running || !turnstile.ready}
                     className="bg-grad-brand rounded-xl px-6 py-3 font-display font-semibold text-black transition hover:opacity-90 disabled:opacity-40"
                   >
                     {running ? "Traitement en cours…" : "Lancer la traduction"}
                   </button>
+                  {running && (
+                    <button
+                      onClick={cancel}
+                      className="rounded-xl border border-destructive/50 px-5 py-3 text-sm text-destructive transition hover:bg-destructive/10"
+                    >
+                      Annuler
+                    </button>
+                  )}
                   {file && !running && (
                     <button
                       onClick={reset}
@@ -286,10 +374,24 @@ function Home() {
 
             {output && (
               <div>
-                <h3 className="font-display text-2xl font-bold">Ta vidéo est prête ✨</h3>
+                <h3 className="font-display text-2xl font-bold">
+                  {output.warnings.length ? "Ta vidéo est prête" : "Ta vidéo est prête ✨"}
+                </h3>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  Voix off et sous-titres anglais, silences coupés, bandeau FR masqué.
+                  Voix off et sous-titres {targetLanguage.label.replace(/^\S+\s/, "").toLowerCase()}
+                  , silences coupés, bandeau d'origine masqué.
                 </p>
+
+                {output.warnings.length > 0 && (
+                  <div className="mt-4 rounded-2xl border border-amber-500/40 bg-amber-500/10 p-4 text-sm">
+                    <p className="font-semibold text-amber-500">Rendu partiel</p>
+                    <ul className="mt-1 list-disc space-y-0.5 pl-4 opacity-90">
+                      {output.warnings.map((warning) => (
+                        <li key={warning}>{warning}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
                 <video
                   src={output.url}
                   controls
@@ -371,8 +473,8 @@ function Home() {
             </ol>
 
             <div className="mt-8 rounded-xl border border-border bg-background/40 p-4 text-xs leading-relaxed text-muted-foreground">
-              La vidéo ne quitte jamais ton navigateur : seuls l'audio et le texte sont envoyés à
-              ElevenLabs et Lovable AI pour la voix off et la traduction.
+              La vidéo ne quitte jamais ton navigateur : seuls l'audio et le texte sont envoyés aux
+              services d'IA pour la transcription, la traduction et la voix off.
             </div>
           </div>
         </section>
@@ -392,7 +494,10 @@ function Home() {
               d: "Détection RMS des blancs > 400 ms. Cuts nets et rythme boosté, façon montage viral.",
             },
           ].map((f) => (
-            <div key={f.t} className="rounded-2xl border border-border bg-card/40 p-6 backdrop-blur">
+            <div
+              key={f.t}
+              className="rounded-2xl border border-border bg-card/40 p-6 backdrop-blur"
+            >
               <h3 className="font-display text-lg font-bold">{f.t}</h3>
               <p className="mt-2 text-sm text-muted-foreground">{f.d}</p>
             </div>
