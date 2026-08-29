@@ -77,7 +77,6 @@ function buildTextFilters(inputs: GraphInputs, withCuts: boolean): string {
   const { cues, subtitleFiles, preset, coverMask, subYAnchor, remap } = inputs;
   const plateColor = preset.boxColor.replace(/@[\d.]+$/, "@0.92");
   const styleBits = buildStyleBits(preset);
-  const useBox = preset.useBox !== false;
 
   return cues
     .flatMap((cue, index) => {
@@ -86,9 +85,12 @@ function buildTextFilters(inputs: GraphInputs, withCuts: boolean): string {
       const enable = `enable=between(t\\,${start}\\,${end})`;
       const filters: string[] = [];
 
-      if (coverMask && useBox) {
+      // La plaque de recouvrement masque le sous-titre d'origine : elle ne doit
+      // pas dépendre de `useBox`, qui n'est qu'un choix de style du texte ajouté.
+      if (coverMask) {
         filters.push(
-          `drawbox=x=0:y=h*${coverMask.y.toFixed(3)}:w=iw:h=h*${coverMask.h.toFixed(3)}:color=${plateColor}:t=fill:${enable}`,
+          // `h` dans drawbox = hauteur de la boîte (auto-référence) : il faut `ih`.
+          `drawbox=x=0:y=ih*${coverMask.y.toFixed(3)}:w=iw:h=ih*${coverMask.h.toFixed(3)}:color=${plateColor}:t=fill:${enable}`,
         );
       }
 
@@ -146,7 +148,10 @@ export function buildGraph(inputs: GraphInputs, toggles: GraphToggles): string {
   if (toggles.masks && activeMasks.length) {
     graph += `[${videoIn}]split=${activeMasks.length + 1}[base]${activeMasks.map((_, i) => `[z${i}]`).join("")};`;
     activeMasks.forEach((mask, i) => {
-      graph += `[z${i}]crop=${mask.w}:${mask.h}:${mask.x}:${mask.y},boxblur=20:2[b${i}];`;
+      // Le flou seul ne suffit pas : un sous-titre incrusté reste lisible même
+      // à fort rayon. On floute puis on aplatit la zone avec une plaque quasi
+      // opaque, ce qui garantit l'illisibilité tout en gardant la teinte locale.
+      graph += `[z${i}]crop=${mask.w}:${mask.h}:${mask.x}:${mask.y},boxblur=40:3,drawbox=x=0:y=0:w=iw:h=ih:color=black@0.55:t=fill[b${i}];`;
     });
     let previous = "base";
     activeMasks.forEach((mask, i) => {

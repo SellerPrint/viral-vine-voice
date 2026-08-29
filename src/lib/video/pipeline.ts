@@ -3,6 +3,7 @@ import { arrayBufferToBase64, exactArrayBuffer } from "@/lib/base64";
 import { DEFAULT_SOURCE_LANGUAGE } from "@/lib/languages";
 
 import { composeNarrationWav } from "./audio/narration";
+import { planSilenceCuts } from "./audio/silence-plan";
 import { detectSilences, keptIntervals, remapTime } from "./audio/wav";
 import { getFfmpeg } from "./ffmpeg-client";
 import { resolveMasks, type GraphInputs } from "./ffmpeg/graph";
@@ -161,23 +162,15 @@ export async function runPipeline(
     const visible = segments.filter((s) => s.textEn.trim()).sort((a, b) => a.start - b.start);
     const wantCuts = opts?.cutSilences !== false && duration > 0;
 
-    // Ne couper que les silences ne recouvrant aucune parole (marge 0,1 s).
-    const speechFree = silences.filter(
-      (s) =>
-        s.end - s.start >= 0.35 &&
-        !visible.some((seg) => seg.start - 0.1 < s.end && seg.end + 0.1 > s.start),
-    );
-
-    const cutList = wantCuts
-      ? speechFree
-          .map((s) => ({ start: s.start + 0.08, end: s.end - 0.08 }))
-          .filter((s) => s.end - s.start > 0.2)
-          .sort((a, b) => b.end - b.start - (a.end - a.start))
-          .slice(0, 40)
-          .sort((a, b) => a.start - b.start)
-      : [];
-
+    // Le silence est rogné contre la parole plutôt qu'écarté dès qu'il la
+    // touche : un silence commence toujours à l'instant où la parole s'arrête,
+    // donc un simple test de chevauchement les éliminait tous.
+    const cutList = wantCuts ? planSilenceCuts(silences, visible) : [];
     const keeps = cutList.length ? keptIntervals(duration, cutList, 0) : [];
+
+    if (wantCuts && !cutList.length && silences.length > 0) {
+      warnings.push("Aucun silence exploitable détecté : la vidéo garde son rythme d'origine.");
+    }
 
     /* -------------------------------- cues ---------------------------------- */
     const cues = buildCues(segments, opts?.wordByWord !== false);

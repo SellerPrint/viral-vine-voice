@@ -165,3 +165,40 @@ describe("buildGraph", () => {
     expect(buildGraph(inputs, allOn)).toBe(buildGraph(inputs, allOn));
   });
 });
+
+describe("masquage du sous-titre d'origine (régressions)", () => {
+  const cover: MaskZone = {
+    id: "bottom",
+    label: "bas",
+    x: 0,
+    y: 0.8,
+    w: 1,
+    h: 0.15,
+    enabled: true,
+  };
+
+  it("dessine la plaque de recouvrement même quand le preset a useBox=false", () => {
+    const preset = { ...SUBTITLE_PRESETS[0], useBox: false };
+    const graph = buildGraph(baseInputs({ preset, coverMask: cover }), allOn);
+    expect(graph).toContain("drawbox=");
+  });
+
+  it("exprime la plaque en `ih` et jamais en `h` (auto-référence drawbox)", () => {
+    const graph = buildGraph(baseInputs({ coverMask: cover }), allOn);
+    const box = graph.match(/drawbox=[^,;]*(?:\\,[^,;]*)*/g) ?? [];
+    expect(box.length).toBeGreaterThan(0);
+    for (const filter of box) {
+      expect(filter).not.toMatch(/[:=]h\*/);
+      expect(filter).toMatch(/y=ih\*/);
+    }
+  });
+
+  it("aplatit la zone masquée avec une plaque opaque en plus du flou", () => {
+    const graph = buildGraph(
+      baseInputs({ activeMasks: [{ x: 0, y: 1574, w: 1080, h: 268 }] }),
+      allOn,
+    );
+    expect(graph).toContain("boxblur=40:3");
+    expect(graph).toMatch(/boxblur=40:3,drawbox=[^[]*t=fill/);
+  });
+});
