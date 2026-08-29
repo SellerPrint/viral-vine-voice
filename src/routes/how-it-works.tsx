@@ -23,12 +23,30 @@ export const Route = createFileRoute("/how-it-works")({
 });
 
 const steps = [
-  { t: "1. Extraction de l'audio", d: "ffmpeg.wasm tourne dans ton navigateur et sort une piste mono 16 kHz depuis ton MP4." },
-  { t: "2. Détection des silences", d: "On analyse le RMS de l'audio par fenêtres de 20 ms. Toute zone < -42 dB pendant plus de 400 ms est marquée à couper." },
-  { t: "3. Transcription française", d: "ElevenLabs Scribe v2 retourne les mots français avec des timestamps précis." },
-  { t: "4. Traduction FR → EN", d: "Lovable AI (Gemini) regroupe les mots en segments puis produit une traduction anglaise concise, calibrée pour tenir dans la durée." },
-  { t: "5. Voix off anglaise", d: "Chaque segment est synthétisé via ElevenLabs Turbo v2.5 avec une voix naturelle et une vitesse ajustée pour coller au timing." },
-  { t: "6. Montage final", d: "Un unique filter_complex ffmpeg masque le bandeau FR, incruste les sous-titres EN, coupe les silences et remplace la piste audio." },
+  {
+    t: "1. Extraction de l'audio",
+    d: "ffmpeg.wasm tourne dans ton navigateur et sort une piste mono 16 kHz depuis ton MP4.",
+  },
+  {
+    t: "2. Détection des silences",
+    d: "On analyse le RMS de l'audio par fenêtres de 20 ms. Toute zone < -42 dB pendant plus de 400 ms est marquée à couper.",
+  },
+  {
+    t: "3. Transcription française",
+    d: "ElevenLabs Scribe v2 retourne les mots français avec des timestamps précis.",
+  },
+  {
+    t: "4. Traduction FR → EN",
+    d: "Lovable AI (Gemini) regroupe les mots en segments puis produit une traduction anglaise concise, calibrée pour tenir dans la durée.",
+  },
+  {
+    t: "5. Voix off anglaise",
+    d: "Chaque segment est synthétisé via ElevenLabs Turbo v2.5 avec une voix naturelle et une vitesse ajustée pour coller au timing.",
+  },
+  {
+    t: "6. Montage final",
+    d: "Un unique filter_complex ffmpeg masque le bandeau FR, incruste les sous-titres EN, coupe les silences et remplace la piste audio.",
+  },
 ];
 
 function HowItWorks() {

@@ -1,3 +1,5 @@
+import type { SourceLanguage } from "@/lib/languages";
+
 export type SubtitlePreset = {
   id: string;
   name: string;
@@ -121,7 +123,6 @@ export const SUBTITLE_PRESETS: SubtitlePreset[] = [
   },
 ];
 
-
 /** Rectangular mask expressed in normalized coords (0..1) of frame. */
 export type MaskZone = {
   id: string;
@@ -168,7 +169,13 @@ export type PipelineOptions = {
   preset: SubtitlePreset;
   overrides: SubtitleOverrides;
   masks: MaskZone[];
+  /** Langue parlée dans la vidéo source */
+  sourceLanguage?: SourceLanguage;
   targetLanguage?: TargetLanguage;
+  /** Interrompt le traitement en cours */
+  signal?: AbortSignal;
+  /** Jeton anti-robot transmis aux endpoints IA */
+  turnstileToken?: string;
   /** Couper réellement les silences (défaut: true) */
   cutSilences?: boolean;
   /** Affichage des sous-titres mot par mot (défaut: true) */
@@ -182,8 +189,6 @@ export type PipelineOptions = {
   /** Effet miroir (flip horizontal) pour éviter la détection de doublon */
   mirror?: boolean;
 };
-
-
 
 export function resolvePreset(preset: SubtitlePreset, o: SubtitleOverrides): SubtitlePreset {
   return { ...preset, ...o };

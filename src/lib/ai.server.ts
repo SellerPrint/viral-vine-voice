@@ -1,18 +1,72 @@
+import { z } from "zod";
+
+import { VOICE_DIRECTIONS, type VoiceDirection } from "./ai.constants";
+import { arrayBufferToBase64, base64ToBytes, exactArrayBuffer } from "./base64";
+
 export type TimedText = { text: string; start: number; end: number };
 
-export type VoiceDirection = "neutral" | "energetic" | "excited" | "serious" | "soft";
+export { VOICE_DIRECTIONS, type VoiceDirection } from "./ai.constants";
+
+/** Toute réponse d'API tierce est validée : un champ manquant ne doit pas
+ *  se propager silencieusement dans le pipeline. */
+const TranscriptionResponse = z.object({
+  text: z.string().default(""),
+  words: z
+    .array(
+      z.object({
+        text: z.string(),
+        start: z.number(),
+        end: z.number(),
+        type: z.string().optional(),
+        speaker_id: z.string().optional(),
+      }),
+    )
+    .default([]),
+});
+
+const TranslationPayload = z.object({
+  results: z.array(
+    z.object({
+      translation: z.string(),
+      direction: z.enum(VOICE_DIRECTIONS).catch("neutral"),
+    }),
+  ),
+});
+
+const ChatCompletionResponse = z.object({
+  choices: z
+    .array(
+      z.object({
+        message: z.object({
+          tool_calls: z
+            .array(z.object({ function: z.object({ arguments: z.string() }) }))
+            .optional(),
+        }),
+      }),
+    )
+    .default([]),
+});
+
+async function readErrorBody(response: Response): Promise<string> {
+  try {
+    return (await response.text()).slice(0, 300);
+  } catch {
+    return "<corps illisible>";
+  }
+}
 
 export async function requestTranscription(
   apiKey: string,
   audioBase64: string,
   mime: string,
+  languageCode: string,
+  signal?: AbortSignal,
 ) {
-  const bytes = Uint8Array.from(atob(audioBase64), (character) => character.charCodeAt(0));
-  const blob = new Blob([bytes], { type: mime });
+  const blob = new Blob([exactArrayBuffer(base64ToBytes(audioBase64))], { type: mime });
   const form = new FormData();
   form.append("file", blob, "audio.wav");
   form.append("model_id", "scribe_v2");
-  form.append("language_code", "fra");
+  form.append("language_code", languageCode);
   form.append("tag_audio_events", "false");
   form.append("diarize", "true");
 
@@ -20,24 +74,24 @@ export async function requestTranscription(
     method: "POST",
     headers: { "xi-api-key": apiKey },
     body: form,
+    signal,
   });
   if (!response.ok) {
-    const error = await response.text();
-    throw new Error(`Transcription failed (${response.status}): ${error.slice(0, 300)}`);
+    throw new Error(
+      `Transcription échouée (${response.status}) : ${await readErrorBody(response)}`,
+    );
   }
-  const result = (await response.json()) as {
-    text: string;
-    words?: Array<{ text: string; start: number; end: number; type?: string; speaker_id?: string }>;
-  };
+
+  const result = TranscriptionResponse.parse(await response.json());
   return {
     text: result.text,
-    words: (result.words ?? [])
+    words: result.words
       .filter((word) => word.type !== "spacing" && word.text.trim().length > 0)
-      .map((w) => ({
-        text: w.text,
-        start: w.start,
-        end: w.end,
-        speakerId: w.speaker_id || "0",
+      .map((word) => ({
+        text: word.text,
+        start: word.start,
+        end: word.end,
+        speakerId: word.speaker_id || "0",
       })),
   };
 }
@@ -45,9 +99,11 @@ export async function requestTranscription(
 export async function requestTranslations(
   apiKey: string,
   segments: TimedText[],
+  sourceLanguage: string,
   targetLanguage: string,
+  signal?: AbortSignal,
 ) {
-  const prompt = `Translate these French segments for a dubbed video in ${targetLanguage}.
+  const prompt = `Translate these ${sourceLanguage} segments for a dubbed video in ${targetLanguage}.
 For each segment, provide:
 1. The translation: natural, concise, matching the duration. Use Sentence Case (only first letter and names capitalized).
 2. The emotional direction: one of [neutral, energetic, excited, serious, soft].
@@ -64,12 +120,13 @@ ${segments.map((segment, index) => `[${index + 1}] (${(segment.end - segment.sta
       Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
     },
+    signal,
     body: JSON.stringify({
       model: "google/gemini-2.5-flash",
       messages: [
         {
           role: "system",
-          content: `You are an expert video translator. Translate French to ${targetLanguage}. Output valid JSON for the tool.`,
+          content: `You are an expert video translator. Translate ${sourceLanguage} to ${targetLanguage}. Output valid JSON for the tool.`,
         },
         { role: "user", content: prompt },
       ],
@@ -90,7 +147,7 @@ ${segments.map((segment, index) => `[${index + 1}] (${(segment.end - segment.sta
                     type: "object",
                     properties: {
                       translation: { type: "string" },
-                      direction: { enum: ["neutral", "energetic", "excited", "serious", "soft"] },
+                      direction: { enum: [...VOICE_DIRECTIONS] },
                     },
                     required: ["translation", "direction"],
                   },
@@ -105,31 +162,30 @@ ${segments.map((segment, index) => `[${index + 1}] (${(segment.end - segment.sta
     }),
   });
   if (!response.ok) {
-    const error = await response.text();
-    throw new Error(`Translation failed (${response.status}): ${error.slice(0, 300)}`);
+    throw new Error(`Traduction échouée (${response.status}) : ${await readErrorBody(response)}`);
   }
-  const result = (await response.json()) as any;
-  const rawArguments = result.choices?.[0]?.message?.tool_calls?.[0]?.function?.arguments;
+
+  const completion = ChatCompletionResponse.parse(await response.json());
+  const rawArguments = completion.choices[0]?.message?.tool_calls?.[0]?.function?.arguments;
   if (!rawArguments) throw new Error("La traduction n'a retourné aucun segment structuré.");
 
-  let parsed: any;
+  let parsed: z.infer<typeof TranslationPayload>;
   try {
-    parsed = JSON.parse(rawArguments);
+    parsed = TranslationPayload.parse(JSON.parse(rawArguments));
   } catch {
     throw new Error("La réponse de traduction est mal formatée.");
   }
-  
-  const results = parsed.results;
-  if (!Array.isArray(results) || results.length !== segments.length) {
-    throw new Error(`Attendu ${segments.length} segments, reçu ${results?.length || 0}.`);
+
+  if (parsed.results.length !== segments.length) {
+    throw new Error(`Attendu ${segments.length} segments, reçu ${parsed.results.length}.`);
   }
 
-  return results.map((r: any) => ({
-    text: String(r.translation)
+  return parsed.results.map((result) => ({
+    text: result.translation
       .replace(/[\r\n]+/g, " ")
       .replace(/\s+/g, " ")
       .trim(),
-    direction: (r.direction || "neutral") as VoiceDirection,
+    direction: result.direction,
   }));
 }
 
@@ -143,6 +199,7 @@ export async function requestSpeech(
     previousText?: string;
     nextText?: string;
   },
+  signal?: AbortSignal,
 ) {
   const delivery = {
     neutral: { stability: 0.5, style: 0.25 },
@@ -153,13 +210,14 @@ export async function requestSpeech(
   }[input.direction];
 
   const response = await fetch(
-    `https://api.elevenlabs.io/v1/text-to-speech/${input.voiceId}?output_format=mp3_44100_128`,
+    `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(input.voiceId)}?output_format=mp3_44100_128`,
     {
       method: "POST",
       headers: {
         "xi-api-key": apiKey,
         "Content-Type": "application/json",
       },
+      signal,
       body: JSON.stringify({
         text: input.text,
         model_id: "eleven_turbo_v2_5",
@@ -176,10 +234,11 @@ export async function requestSpeech(
     },
   );
   if (!response.ok) {
-    const error = await response.text();
-    throw new Error(`TTS failed (${response.status}): ${error.slice(0, 300)}`);
+    throw new Error(
+      `Synthèse vocale échouée (${response.status}) : ${await readErrorBody(response)}`,
+    );
   }
-  return Buffer.from(await response.arrayBuffer()).toString("base64");
+  return arrayBufferToBase64(await response.arrayBuffer());
 }
 
 /**
@@ -189,6 +248,7 @@ export async function requestSpeech(
 export async function requestClonedSpeech(
   apiKey: string,
   input: { text: string; voiceId: string; speed: number; direction: VoiceDirection },
+  signal?: AbortSignal,
 ) {
   const tone = {
     neutral: "Speak naturally.",
@@ -204,6 +264,7 @@ export async function requestClonedSpeech(
       Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
     },
+    signal,
     body: JSON.stringify({
       model: "tts-1-hd",
       input: input.text,
@@ -214,8 +275,9 @@ export async function requestClonedSpeech(
     }),
   });
   if (!response.ok) {
-    const error = await response.text();
-    throw new Error(`ai33.pro TTS failed (${response.status}): ${error.slice(0, 300)}`);
+    throw new Error(
+      `Synthèse vocale ai33.pro échouée (${response.status}) : ${await readErrorBody(response)}`,
+    );
   }
-  return Buffer.from(await response.arrayBuffer()).toString("base64");
+  return arrayBufferToBase64(await response.arrayBuffer());
 }

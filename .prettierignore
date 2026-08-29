@@ -6,3 +6,10 @@ pnpm-lock.yaml
 package-lock.json
 bun.lock
 routeTree.gen.ts
+
+# Fichiers gérés par Lovable : ne pas reformater (la synchro compare le contenu)
+AGENTS.md
+.lovable/
+
+# Assets et police vendorisée
+public/fonts/
