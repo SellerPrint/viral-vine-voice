@@ -28,6 +28,13 @@ export type GraphInputs = {
   upscale?: UpscaleMode;
   videoWidth?: number;
   videoHeight?: number;
+  /**
+   * Cadence de la source, requise par `xfade`.
+   *
+   * Etait codee a 30 : une source 60 fps etait silencieusement ramenee a
+   * 30 fps par la normalisation, divisant la fluidite par deux.
+   */
+  fps?: number;
   /** Transition entre segments conserves. */
   transition?: TransitionType;
   /** Duree souhaitee de la transition, en secondes. */
@@ -191,6 +198,7 @@ export function buildGraph(inputs: GraphInputs, toggles: GraphToggles): string {
         durations,
         transition,
         "vcut",
+        inputs.fps && inputs.fps > 0 ? inputs.fps : 30,
       );
       graph += chain;
     } else {

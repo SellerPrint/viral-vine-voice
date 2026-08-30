@@ -118,6 +118,26 @@ function isProductionDeployment(): boolean {
   );
 }
 
+/**
+ * Cle d'idempotence stable derivee du jeton.
+ *
+ * Elle doit etre identique pour toutes les validations d'un meme jeton, et
+ * differente d'un jeton a l'autre : un hash du jeton remplit exactement ce
+ * contrat, sans etat partage entre instances.
+ */
+async function idempotencyKey(token: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token));
+  const hex = [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+  // Format UUID v4 attendu par Cloudflare.
+  return [
+    hex.slice(0, 8),
+    hex.slice(8, 12),
+    `4${hex.slice(13, 16)}`,
+    `8${hex.slice(17, 20)}`,
+    hex.slice(20, 32),
+  ].join("-");
+}
+
 export async function verifyTurnstile(token: string | undefined): Promise<void> {
   const secret = process.env.TURNSTILE_SECRET_KEY;
 
@@ -150,11 +170,38 @@ export async function verifyTurnstile(token: string | undefined): Promise<void> 
   const ip = clientKey();
   if (ip !== "unknown") body.append("remoteip", ip);
 
+  // `idempotency_key` : sans elle, rejouer la validation d'un jeton deja
+  // valide renvoie `timeout-or-duplicate`, car un jeton Turnstile est a usage
+  // unique. Avec une cle stable derivee du jeton, Cloudflare rejoue le meme
+  // resultat au lieu de refuser.
+  body.append("idempotency_key", await idempotencyKey(token));
+
   const response = await fetch(TURNSTILE_VERIFY_URL, { method: "POST", body });
-  const result = (await response.json()) as { success?: boolean };
+  const result = (await response.json()) as {
+    success?: boolean;
+    "error-codes"?: string[];
+  };
 
   if (!result.success) {
-    throw new Error("Vérification anti-robot échouée. Recharge la page et réessaie.");
+    const codes = result["error-codes"] ?? [];
+
+    // `timeout-or-duplicate` signifie que le jeton a deja servi ou a expire
+    // (5 minutes). Sur un rendu long — transcription, traduction, puis un
+    // appel de synthese par segment — c'est le cas nominal, pas une attaque.
+    // Le cache en memoire ne suffit pas : sur Vercel chaque requete peut
+    // atterrir sur une instance differente, avec une Map vide.
+    if (codes.includes("timeout-or-duplicate")) {
+      throw new Error(
+        "La vérification anti-robot a expiré pendant le traitement. " +
+          "Recharge la page et relance : le jeton n'est valable que 5 minutes.",
+      );
+    }
+
+    console.error("[turnstile] siteverify a refusé le jeton", codes);
+    throw new Error(
+      `Vérification anti-robot échouée${codes.length ? ` (${codes.join(", ")})` : ""}. ` +
+        `Recharge la page et réessaie.`,
+    );
   }
 
   verifiedTokens.set(token, now + TOKEN_TTL_MS);

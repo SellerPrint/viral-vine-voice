@@ -198,6 +198,12 @@ export async function renderWithFallback(
 
     // Écarte les graphes syntaxiquement invalides sans payer l'encodage.
     if (!(await validateGraph(ff, graph, useVoice))) {
+      // Sans cette trace, une degradation restait inexplicable : l'utilisateur
+      // lisait « filtre visuel non applique » sans jamais savoir pourquoi.
+      console.warn(
+        `[render] graphe invalide pour « ${attempt.note} » : passage a la tentative suivante.`,
+        { graph },
+      );
       onProgress?.(`Nouvel essai (${attempt.note})…`);
       continue;
     }
@@ -242,6 +248,13 @@ export async function renderWithFallback(
     }
 
     lastLogs = runLogs.slice(-12).join("\n");
+
+    if (code !== 0) {
+      const why = lastLogs.match(/(Error|Invalid|failed|No such|Cannot)[^\n]*/i)?.[0];
+      console.warn(
+        `[render] echec de l'encodage pour « ${attempt.note} » (code ${code})${why ? ` : ${why}` : ""}`,
+      );
+    }
 
     if (code === 0) {
       try {

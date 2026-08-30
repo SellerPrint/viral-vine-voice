@@ -204,6 +204,11 @@ export async function runPipeline(
     const videoWidth = sizeMatch ? +sizeMatch[1] : 0;
     const videoHeight = sizeMatch ? +sizeMatch[2] : 0;
 
+    // `xfade` normalise chaque segment a une cadence donnee : utiliser celle
+    // de la source evite de degrader une video 50 ou 60 fps.
+    const fpsMatch = probe.match(/,\s*([\d.]+)\s*fps\b/);
+    const sourceFps = fpsMatch ? parseFloat(fpsMatch[1]) : 0;
+
     const sourceHasAudio = /Stream #\d+:\d+.*: Audio:/.test(probe);
     const dropOriginalAudio = opts?.removeOriginalAudio !== false;
     const hasAudio = sourceHasAudio && !dropOriginalAudio;
@@ -244,6 +249,7 @@ export async function runPipeline(
       upscale: opts?.upscale ?? "none",
       videoWidth,
       videoHeight,
+      fps: sourceFps,
       transition,
       transitionDuration: transitionSeconds,
     };
