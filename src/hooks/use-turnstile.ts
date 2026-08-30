@@ -17,7 +17,7 @@ type TurnstileApi = {
     options: {
       sitekey: string;
       callback: (token: string) => void;
-      "error-callback"?: () => void;
+      "error-callback"?: (code?: string) => void;
       "expired-callback"?: () => void;
       theme?: "light" | "dark" | "auto";
       size?: "normal" | "flexible" | "compact";
@@ -71,6 +71,7 @@ export function useTurnstile() {
   const [container, setContainer] = useState<HTMLDivElement | null>(null);
   const [token, setToken] = useState<string | undefined>(undefined);
   const [failed, setFailed] = useState(false);
+  const [errorCode, setErrorCode] = useState<string | undefined>(undefined);
 
   /**
    * Callback ref plutôt que `useRef`.
@@ -102,15 +103,25 @@ export function useTurnstile() {
             setToken(value);
             setFailed(false);
           },
-          "error-callback": () => {
+          // Cloudflare transmet un code d'erreur précis. L'ignorer revenait à
+          // afficher « bloqueur de publicité ? » alors que la cause réelle est
+          // souvent tout autre — un domaine non déclaré, par exemple.
+          "error-callback": (code) => {
             setToken(undefined);
+            setErrorCode(code);
             setFailed(true);
+            console.error("[turnstile] error-callback", code ?? "(sans code)");
           },
           "expired-callback": () => setToken(undefined),
         });
       })
-      .catch(() => {
-        if (!cancelled) setFailed(true);
+      .catch((error) => {
+        if (cancelled) return;
+        // Le script lui-même n'a pas pu être chargé : là, un bloqueur ou un
+        // réseau filtrant est effectivement l'explication la plus probable.
+        setErrorCode("script-load");
+        setFailed(true);
+        console.error("[turnstile] chargement du script impossible", error);
       });
 
     return () => {
@@ -151,6 +162,44 @@ export function useTurnstile() {
      */
     ready: !enabled || Boolean(token) || failed,
     failed,
+    /** Code d'erreur Cloudflare, pour un diagnostic exploitable. */
+    errorCode,
+    /** Message expliquant la cause réelle et l'action à mener. */
+    errorMessage: errorCode ? describeTurnstileError(errorCode) : undefined,
     reset,
   };
+}
+
+/**
+ * Traduit un code d'erreur Turnstile en cause probable et action concrète.
+ *
+ * @see https://developers.cloudflare.com/turnstile/troubleshooting/client-side-errors/error-codes/
+ */
+export function describeTurnstileError(code: string): string {
+  if (code === "script-load") {
+    return "Le script de vérification n'a pas pu être téléchargé : bloqueur de publicité, extension ou réseau filtrant challenges.cloudflare.com.";
+  }
+  // Les codes sont hiérarchiques : on teste du plus précis au plus général.
+  if (code.startsWith("110200")) {
+    return "Ce domaine n'est pas autorisé pour cette clé Turnstile. Ajoute le domaine dans Cloudflare → Turnstile → Hostname Management (code 110200).";
+  }
+  if (code.startsWith("110100") || code.startsWith("110110") || code.startsWith("400020")) {
+    return `Clé de site Turnstile invalide ou introuvable : vérifie VITE_TURNSTILE_SITE_KEY (code ${code}).`;
+  }
+  if (code.startsWith("400070")) {
+    return "Cette clé Turnstile est désactivée dans le tableau de bord Cloudflare (code 400070).";
+  }
+  if (code.startsWith("110600") || code.startsWith("110620")) {
+    return "La vérification a expiré. Réessaie — si le problème persiste, vérifie l'horloge de ta machine.";
+  }
+  if (code.startsWith("200100")) {
+    return "Horloge système décalée ou réponse mise en cache par un intermédiaire (code 200100).";
+  }
+  if (code.startsWith("200500")) {
+    return "Le cadre de vérification n'a pas pu se charger : challenges.cloudflare.com est probablement bloqué (code 200500).";
+  }
+  if (code.startsWith("300") || code.startsWith("600")) {
+    return `Vérification refusée. Réessaie, ou change de réseau si tu utilises un VPN (code ${code}).`;
+  }
+  return `Vérification anti-robot indisponible (code ${code}).`;
 }

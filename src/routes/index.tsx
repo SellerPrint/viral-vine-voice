@@ -345,9 +345,10 @@ function Home() {
                     <div ref={turnstile.containerRef} />
                     {turnstile.failed && (
                       <p className="mt-2 text-xs text-destructive">
-                        La vérification anti-robot n'a pas pu se charger (bloqueur de publicité ou
-                        réseau restreint ?). Tu peux quand même lancer la traduction : elle échouera
-                        si le serveur refuse la requête.
+                        {turnstile.errorMessage ??
+                          "La vérification anti-robot n'a pas pu se charger."}{" "}
+                        Tu peux quand même lancer la traduction : elle échouera si le serveur refuse
+                        la requête.
                       </p>
                     )}
                   </div>
