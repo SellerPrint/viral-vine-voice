@@ -18,10 +18,7 @@ export async function getFfmpeg(onLog?: (m: string) => void, onProgress?: (p: nu
   if (loading) return loading;
 
   loading = (async () => {
-    const [{ FFmpeg }, { toBlobURL }] = await Promise.all([
-      import("@ffmpeg/ffmpeg"),
-      import("@ffmpeg/util"),
-    ]);
+    const { FFmpeg } = await import("@ffmpeg/ffmpeg");
 
     const ff = new FFmpeg();
     ff.on("log", ({ message }) => {
@@ -32,11 +29,19 @@ export async function getFfmpeg(onLog?: (m: string) => void, onProgress?: (p: nu
       ff.on("progress", ({ progress }) => onProgress(Math.max(0, Math.min(1, progress))));
     }
 
-    const [coreURL, wasmURL] = await Promise.all([
-      toBlobURL(coreUrl, "text/javascript"),
-      toBlobURL(wasmUrl, "application/wasm"),
-    ]);
-    await ff.load({ coreURL, wasmURL });
+    // Les URLs sont passées directement, sans `toBlobURL`.
+    //
+    // `toBlobURL` recopie le cœur dans un `blob:` que le worker charge ensuite
+    // par `importScripts()`. Or le cœur est un module ESM : `importScripts`
+    // échoue toujours, et @ffmpeg/ffmpeg retombe sur `await import(blob:)`.
+    // Cet import dynamique d'un blob est bloqué par notre CSP et refusé par
+    // certains navigateurs, d'où « Failed to fetch dynamically imported
+    // module: blob:… » au lancement d'un rendu.
+    //
+    // Les fichiers sont déjà servis par notre propre origine : le détour par
+    // un blob n'apportait rien. On économise au passage la recopie en mémoire
+    // des 32 Mo du .wasm.
+    await ff.load({ coreURL: coreUrl, wasmURL: wasmUrl });
 
     instance = ff;
     return ff;
