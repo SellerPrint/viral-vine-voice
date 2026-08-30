@@ -7,7 +7,7 @@ import {
   requestTranscription,
   requestTranslations,
 } from "./ai.server";
-import { guard, requestSignal } from "./guard.server";
+import { consumeTtsBudget, guard, requestSignal } from "./guard.server";
 
 // Les schémas vivent dans `ai.schemas.ts` : TanStack compile ce module pour le
 // client, et les garder à part les rend testables directement.
@@ -27,7 +27,7 @@ export const transcribeAudio = createServerFn({ method: "POST" })
 export const translateSegments = createServerFn({ method: "POST" })
   .inputValidator((input: unknown) => translateInput.parse(input))
   .handler(async ({ data }) => {
-    if (data.segments.length === 0) return { segments: [] };
+    if (data.segments.length === 0) return { segments: [], untranslated: 0 };
 
     await guard("translate", data.turnstileToken);
     const signal = requestSignal();
@@ -35,7 +35,7 @@ export const translateSegments = createServerFn({ method: "POST" })
     const apiKey = process.env.LOVABLE_API_KEY;
     if (!apiKey) throw new Error("Clé API de traduction manquante (LOVABLE_API_KEY).");
 
-    const results = await requestTranslations(
+    const { results, failed } = await requestTranslations(
       apiKey,
       data.segments,
       data.sourceLanguage,
@@ -44,6 +44,8 @@ export const translateSegments = createServerFn({ method: "POST" })
     );
 
     return {
+      // `failed` : segments retombés sur le texte source (lot en échec).
+      untranslated: failed,
       segments: data.segments.map((segment, index) => ({
         start: segment.start,
         end: segment.end,
@@ -58,6 +60,8 @@ export const synthesizeSpeech = createServerFn({ method: "POST" })
   .inputValidator((input: unknown) => speechInput.parse(input))
   .handler(async ({ data }) => {
     await guard("speech", data.turnstileToken);
+    // Plafond global : borne la facture même derrière un pool de proxys.
+    consumeTtsBudget(data.text.length);
     const signal = requestSignal();
 
     if (data.provider === "ai33") {

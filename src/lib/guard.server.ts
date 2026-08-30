@@ -29,7 +29,7 @@ export type RateLimitRule = {
 export const RATE_LIMITS = {
   transcribe: { limit: 10, windowMs: 60 * 60 * 1000 },
   translate: { limit: 30, windowMs: 60 * 60 * 1000 },
-  speech: { limit: 400, windowMs: 60 * 60 * 1000 },
+  speech: { limit: 120, windowMs: 60 * 60 * 1000 },
 } as const satisfies Record<string, RateLimitRule>;
 
 type Bucket = { count: number; resetAt: number };
@@ -103,11 +103,36 @@ export function isTurnstileEnabled(): boolean {
   return Boolean(process.env.TURNSTILE_SECRET_KEY);
 }
 
+/**
+ * Vrai en production déployée (Vercel, Cloudflare, Netlify) — pas en local.
+ *
+ * En production, l'absence de Turnstile laisse les endpoints IA ouverts à
+ * n'importe quel script : on refuse de servir plutôt que de facturer.
+ */
+function isProductionDeployment(): boolean {
+  return (
+    process.env.VERCEL_ENV === "production" ||
+    process.env.NODE_ENV === "production" ||
+    Boolean(process.env.CF_PAGES) ||
+    Boolean(process.env.NETLIFY)
+  );
+}
+
 export async function verifyTurnstile(token: string | undefined): Promise<void> {
   const secret = process.env.TURNSTILE_SECRET_KEY;
-  // Non configuré : on laisse passer pour ne pas casser le développement local.
-  // La limitation de débit reste active dans tous les cas.
-  if (!secret) return;
+
+  if (!secret) {
+    // En production, laisser passer reviendrait à offrir un proxy ElevenLabs
+    // anonyme et gratuit. On échoue explicitement plutôt que silencieusement.
+    if (isProductionDeployment()) {
+      throw new Error(
+        "Configuration incomplète : TURNSTILE_SECRET_KEY est requis en production.",
+      );
+    }
+    // En local, on laisse passer pour ne pas casser le développement.
+    // La limitation de débit reste active dans tous les cas.
+    return;
+  }
 
   if (!token) {
     throw new Error("Vérification anti-robot requise. Recharge la page et réessaie.");
@@ -135,6 +160,59 @@ export async function verifyTurnstile(token: string | undefined): Promise<void> 
   }
 
   verifiedTokens.set(token, now + TOKEN_TTL_MS);
+}
+
+/* ──────────────────── Plafond de dépense global ──────────────────── */
+
+/**
+ * Budget de caractères TTS pour l'ensemble du service, par fenêtre glissante.
+ *
+ * La limitation par IP ne borne pas la facture : elle est contournée par un
+ * simple pool de proxys, et le compteur est propre à chaque isolat. Ce plafond
+ * global est le seul garde-fou qui borne réellement la dépense.
+ *
+ * 2 000 000 caractères/jour ≈ 300 $/jour au tarif ElevenLabs Turbo — à ajuster
+ * via `TTS_DAILY_CHAR_BUDGET` selon ce que vous acceptez de payer.
+ *
+ * ⚠️ Comme le compteur par IP, il vit en mémoire de l'isolat : c'est un
+ * garde-fou best-effort, pas une garantie comptable. Pour un plafond strict,
+ * déportez-le dans un stockage partagé (Vercel KV, Durable Object) — voir
+ * `docs/rate-limiting.md`. Doublez-le systématiquement d'un plafond de
+ * facturation chez le fournisseur lui-même.
+ */
+const DEFAULT_TTS_DAILY_CHARS = 2_000_000;
+
+function ttsDailyBudget(): number {
+  const raw = Number(process.env.TTS_DAILY_CHAR_BUDGET);
+  return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_TTS_DAILY_CHARS;
+}
+
+const BUDGET_WINDOW_MS = 24 * 60 * 60 * 1000;
+let ttsBudget = { used: 0, resetAt: 0 };
+
+export class BudgetExceededError extends Error {
+  readonly statusCode = 503;
+  constructor() {
+    super("Le service a atteint son quota quotidien. Réessaie demain.");
+    this.name = "BudgetExceededError";
+  }
+}
+
+/** Décompte `chars` du budget global TTS, ou lève si le plafond est atteint. */
+export function consumeTtsBudget(chars: number): void {
+  const now = Date.now();
+  if (now >= ttsBudget.resetAt) {
+    ttsBudget = { used: 0, resetAt: now + BUDGET_WINDOW_MS };
+  }
+  if (ttsBudget.used + chars > ttsDailyBudget()) {
+    throw new BudgetExceededError();
+  }
+  ttsBudget.used += chars;
+}
+
+/** Exposé pour les tests. */
+export function __resetTtsBudget(): void {
+  ttsBudget = { used: 0, resetAt: 0 };
 }
 
 /** Garde commune : Turnstile puis limitation de débit. */

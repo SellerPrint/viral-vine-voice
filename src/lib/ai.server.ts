@@ -96,7 +96,8 @@ export async function requestTranscription(
   };
 }
 
-export async function requestTranslations(
+/** Traduit un lot en un appel. Lève si le compte de résultats ne correspond pas. */
+async function requestTranslationBatch(
   apiKey: string,
   segments: TimedText[],
   sourceLanguage: string,
@@ -187,6 +188,63 @@ ${segments.map((segment, index) => `[${index + 1}] (${(segment.end - segment.sta
       .trim(),
     direction: result.direction,
   }));
+}
+
+/**
+ * Nombre de segments par appel de traduction.
+ *
+ * Un appel unique sur toute la vidéo était en tout-ou-rien : si le modèle
+ * renvoyait 39 résultats pour 40 segments, l'intégralité était perdue — y
+ * compris la transcription déjà facturée. Découper borne la casse à un lot.
+ */
+export const TRANSLATION_BATCH_SIZE = 25;
+
+export type TranslationResult = { text: string; direction: VoiceDirection };
+
+/**
+ * Traduit tous les segments, lot par lot.
+ *
+ * Un lot en échec ne fait pas échouer le rendu : ses segments retombent sur le
+ * texte source avec une prosodie neutre. La vidéo reste exploitable, et
+ * `failed` permet d'avertir l'utilisateur de ce qui n'a pas été traduit.
+ */
+export async function requestTranslations(
+  apiKey: string,
+  segments: TimedText[],
+  sourceLanguage: string,
+  targetLanguage: string,
+  signal?: AbortSignal,
+): Promise<{ results: TranslationResult[]; failed: number }> {
+  const batches: TimedText[][] = [];
+  for (let i = 0; i < segments.length; i += TRANSLATION_BATCH_SIZE) {
+    batches.push(segments.slice(i, i + TRANSLATION_BATCH_SIZE));
+  }
+
+  const results: TranslationResult[] = [];
+  let failed = 0;
+
+  for (const batch of batches) {
+    signal?.throwIfAborted();
+    try {
+      results.push(
+        ...(await requestTranslationBatch(apiKey, batch, sourceLanguage, targetLanguage, signal)),
+      );
+    } catch (error) {
+      if (signal?.aborted) throw error;
+      console.error(`Traduction échouée sur un lot de ${batch.length} segments`, error);
+      failed += batch.length;
+      // Repli : on garde le texte source plutôt que de perdre le segment.
+      results.push(...batch.map((segment) => ({ text: segment.text, direction: "neutral" as const })));
+    }
+  }
+
+  // Tous les lots ont échoué : rien n'a été traduit, autant le dire clairement
+  // que de livrer une vidéo doublée dans la langue d'origine.
+  if (segments.length > 0 && failed === segments.length) {
+    throw new Error("La traduction a échoué sur l'ensemble des segments.");
+  }
+
+  return { results, failed };
 }
 
 export async function requestSpeech(

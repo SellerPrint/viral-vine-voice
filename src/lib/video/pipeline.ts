@@ -114,7 +114,7 @@ export async function runPipeline(
 
     /* ------------------------------ traduction ------------------------------ */
     progress("translate", `Traduction + prosodie (${targetLanguage.name})…`);
-    const { segments } = await translateSegments({
+    const { segments, untranslated } = await translateSegments({
       signal,
       data: {
         segments: rawSegments.map((s) => ({ text: s.text, start: s.start, end: s.end })),
@@ -123,6 +123,12 @@ export async function runPipeline(
         turnstileToken: opts?.turnstileToken,
       },
     });
+
+    if (untranslated > 0) {
+      warnings.push(
+        `${untranslated} segment${untranslated > 1 ? "s" : ""} n'${untranslated > 1 ? "ont" : "a"} pas pu être traduit${untranslated > 1 ? "s" : ""} : le texte d'origine est conservé.`,
+      );
+    }
 
     const segs = segments as Array<(typeof segments)[number] & { speakerId?: string }>;
     segs.forEach((segment, index) => {
