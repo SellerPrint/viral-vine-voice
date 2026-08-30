@@ -566,8 +566,9 @@ export function SettingsPanel({
           ))}
         </div>
         <p className="mt-3 text-xs text-muted-foreground">
-          Les zones cochées sont floutées via <code>delogo</code> (interpolation des pixels
-          voisins), pas de bandeau noir. Les nouveaux sous-titres se superposent par-dessus.
+          Les zones cochées sont floutées puis assombries, ce qui rend illisible un sous-titre ou un
+          logo incrusté. Ne coche que les zones réellement occupées : une zone cochée à tort laisse
+          une bande visible sur l&apos;image. Les nouveaux sous-titres se superposent par-dessus.
         </p>
       </div>
     </div>

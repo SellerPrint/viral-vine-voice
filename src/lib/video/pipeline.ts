@@ -144,8 +144,14 @@ export async function runPipeline(
         "La voix off n'a pu être générée sur aucun segment (quota ou clé API). La vidéo est rendue sans doublage.",
       );
     } else if (narration.failed > 0) {
+      // Le motif change tout : « limite de débit atteinte » invite à relancer,
+      // « clé API refusée » demande une action de configuration.
+      const why = narration.failureReasons.length
+        ? ` (${narration.failureReasons.join(", ")})`
+        : "";
       warnings.push(
-        `${narration.failed} segment${narration.failed > 1 ? "s" : ""} sur ${narration.total} sans voix off.`,
+        `${narration.failed} segment${narration.failed > 1 ? "s" : ""} sur ${narration.total} sans voix off${why}. ` +
+          `Chaque segment a été retenté 3 fois avant abandon.`,
       );
     }
 

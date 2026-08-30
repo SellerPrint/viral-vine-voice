@@ -191,13 +191,17 @@ async function requestTranslationBatch(
   targetLanguage: string,
   signal?: AbortSignal,
 ) {
-  // Budget de mots par segment : la voix de synthese lit ~2,8 mots/seconde et
-  // n'est acceleree qu'a 1,2x maximum. Au-dela de ce budget, l'audio deborde
-  // de son creneau, decale les segments suivants et finit tronque.
+  // Budget de mots par segment : la voix de synthese lit ~2,8 mots/seconde.
+  //
+  // Le budget etait auparavant multiplie par la vitesse maximale (1,2x), ce
+  // qui revenait a supposer que *chaque* segment serait accelere au maximum.
+  // L'acceleration est une marge de securite, pas le regime nominal : la
+  // consommer d'avance garantissait un depassement des que la traduction
+  // atteignait son budget. On dimensionne donc a vitesse naturelle et l'on
+  // garde 1,2x pour absorber les depassements ponctuels.
   const WORDS_PER_SECOND = 2.8;
-  const MAX_SPEED = 1.2;
   const wordBudget = (segment: TimedText) =>
-    Math.max(2, Math.floor((segment.end - segment.start) * WORDS_PER_SECOND * MAX_SPEED));
+    Math.max(2, Math.floor((segment.end - segment.start) * WORDS_PER_SECOND));
 
   const prompt = `Translate these ${sourceLanguage} segments for a dubbed video in ${targetLanguage}.
 For each segment, provide:
