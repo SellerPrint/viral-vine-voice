@@ -126,8 +126,16 @@ export function useTurnstile() {
     containerRef,
     /** Jeton à transmettre aux appels serveur. */
     token,
-    /** Prêt à lancer un traitement. */
-    ready: !enabled || Boolean(token),
+    /**
+     * Prêt à lancer un traitement.
+     *
+     * `failed` débloque volontairement le bouton : si le widget ne peut pas se
+     * charger (réseau, bloqueur de pub, CSP), l'utilisateur restait sinon
+     * bloqué sans aucun recours, face à un bouton grisé et sans explication.
+     * On laisse tenter — le serveur, lui, refuse toujours un jeton absent ou
+     * invalide, donc la protection n'est pas affaiblie.
+     */
+    ready: !enabled || Boolean(token) || failed,
     failed,
     reset,
   };
