@@ -171,7 +171,7 @@ export type MaskZone = {
 };
 
 export const DEFAULT_MASKS: MaskZone[] = [
-  { id: "bottom", label: "Sous-titres FR (bas)", x: 0, y: 0.82, w: 1, h: 0.14, enabled: true },
+  { id: "bottom", label: "Sous-titres FR (bas)", x: 0, y: 0.82, w: 1, h: 0.14, enabled: false },
   { id: "top", label: "Bandeau haut", x: 0, y: 0, w: 1, h: 0.08, enabled: false },
   { id: "tl", label: "Logo haut-gauche", x: 0, y: 0.02, w: 0.28, h: 0.08, enabled: false },
   { id: "tr", label: "Logo haut-droite", x: 0.72, y: 0.02, w: 0.28, h: 0.08, enabled: false },
