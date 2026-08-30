@@ -4,11 +4,13 @@ import { DEFAULT_SOURCE_LANGUAGE } from "@/lib/languages";
 
 import { composeNarrationWav } from "./audio/narration";
 import { planSilenceCuts } from "./audio/silence-plan";
-import { detectSilences, keptIntervals, remapTime } from "./audio/wav";
+import { detectSilences, keptIntervals } from "./audio/wav";
 import { getFfmpeg } from "./ffmpeg-client";
+import { loadFont } from "./font";
 import { resolveMasks, type GraphInputs } from "./ffmpeg/graph";
 import { renderWithFallback } from "./ffmpeg/render";
 import { DEFAULT_MASKS, SUBTITLE_PRESETS, resolvePreset, type PipelineOptions } from "./presets";
+import { remapTimeWithTransitions, transitionDurations } from "./transitions";
 import { buildCues, groupWordsToSegments, wrapLines, type Segment } from "./subtitles/cues";
 
 export type { Segment, Word, Cue } from "./subtitles/cues";
@@ -26,21 +28,6 @@ export type PipelineResult = {
   /** Dégradations et échecs partiels à signaler à l'utilisateur. */
   warnings: string[];
 };
-
-const FONT_URL = "/fonts/Roboto-Bold.ttf";
-
-/** Police mise en cache pour la durée de la session. */
-let fontBytes: Uint8Array | null = null;
-
-async function loadFont(signal?: AbortSignal): Promise<Uint8Array> {
-  if (fontBytes) return fontBytes;
-  const response = await fetch(FONT_URL, { signal });
-  if (!response.ok) {
-    throw new Error("Impossible de charger la police des sous-titres.");
-  }
-  fontBytes = new Uint8Array(await response.arrayBuffer());
-  return fontBytes;
-}
 
 export async function readFileBytes(file: File): Promise<Uint8Array> {
   return new Uint8Array(await file.arrayBuffer());
@@ -214,6 +201,14 @@ export async function runPipeline(
       await ff.writeFile("voice.wav", voiceWav);
     }
 
+    // Les fondus font se recouvrir les segments : le remappage des sous-titres
+    // doit integrer ce raccourcissement, sinon ils derivent un peu plus a
+    // chaque coupe.
+    const transition = opts?.transition ?? "none";
+    const transitionSeconds = opts?.transitionDuration ?? 0.3;
+    const cutDurations =
+      transition === "none" ? keeps.map(() => 0) : transitionDurations(keeps, transitionSeconds);
+
     const graphInputs: GraphInputs = {
       cues,
       subtitleFiles,
@@ -225,7 +220,13 @@ export async function runPipeline(
       hasAudio,
       hasVoice: Boolean(voiceWav),
       mirror: opts?.mirror === true,
-      remap: (t) => remapTime(t, keeps),
+      remap: (t) => remapTimeWithTransitions(t, keeps, cutDurations),
+      filterId: opts?.filterId,
+      upscale: opts?.upscale ?? "none",
+      videoWidth,
+      videoHeight,
+      transition,
+      transitionDuration: transitionSeconds,
     };
 
     /* -------------------------------- rendu --------------------------------- */

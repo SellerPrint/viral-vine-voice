@@ -153,7 +153,9 @@ function Home() {
         },
         {
           preset,
-          overrides,
+          // L'opacite est pilotee par un curseur dedie, mais transite par les
+          // surcharges de preset comme les autres reglages de style.
+          overrides: { ...overrides, boxOpacity: renderOptions.subtitleOpacity },
           masks,
           sourceLanguage,
           targetLanguage,
@@ -165,6 +167,11 @@ function Home() {
           mirror: renderOptions.mirror,
           ttsProvider: renderOptions.ttsProvider,
           clonedVoiceId: renderOptions.clonedVoiceId,
+          filterId: renderOptions.filterId,
+          upscale: renderOptions.upscale,
+          // Une transition sans coupe n'a aucun sens : rien a raccorder.
+          transition: renderOptions.cutSilences ? renderOptions.transition : "none",
+          transitionDuration: renderOptions.transitionDuration,
         },
       );
 

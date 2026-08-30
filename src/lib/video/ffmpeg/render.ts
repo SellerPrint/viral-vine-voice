@@ -6,12 +6,81 @@ export type RenderAttempt = GraphToggles & { note: string };
 
 /** Stratégie de repli : du rendu complet au plus dégradé. */
 export const RENDER_ATTEMPTS: RenderAttempt[] = [
-  { masks: true, text: true, voice: true, cuts: true, note: "complet" },
-  { masks: false, text: true, voice: true, cuts: true, note: "sans masques" },
-  { masks: false, text: true, voice: false, cuts: true, note: "coupes prioritaires" },
-  { masks: false, text: true, voice: true, cuts: false, note: "sans coupe des silences" },
-  { masks: false, text: true, voice: false, cuts: false, note: "sans voix off" },
-  { masks: false, text: false, voice: false, cuts: false, note: "vidéo seule" },
+  {
+    masks: true,
+    text: true,
+    voice: true,
+    cuts: true,
+    look: true,
+    transitions: true,
+    note: "complet",
+  },
+  // Les transitions sont l'element le plus fragile : on les lache en premier,
+  // avant de sacrifier masques, sous-titres ou voix off.
+  {
+    masks: true,
+    text: true,
+    voice: true,
+    cuts: true,
+    look: true,
+    transitions: false,
+    note: "sans transitions",
+  },
+  // L'upscale est le plus gros consommateur de memoire : second a partir.
+  {
+    masks: true,
+    text: true,
+    voice: true,
+    cuts: true,
+    look: false,
+    transitions: false,
+    note: "sans filtre visuel",
+  },
+  {
+    masks: false,
+    text: true,
+    voice: true,
+    cuts: true,
+    look: false,
+    transitions: false,
+    note: "sans masques",
+  },
+  {
+    masks: false,
+    text: true,
+    voice: false,
+    cuts: true,
+    look: false,
+    transitions: false,
+    note: "coupes prioritaires",
+  },
+  {
+    masks: false,
+    text: true,
+    voice: true,
+    cuts: false,
+    look: false,
+    transitions: false,
+    note: "sans coupe des silences",
+  },
+  {
+    masks: false,
+    text: true,
+    voice: false,
+    cuts: false,
+    look: false,
+    transitions: false,
+    note: "sans voix off",
+  },
+  {
+    masks: false,
+    text: false,
+    voice: false,
+    cuts: false,
+    look: false,
+    transitions: false,
+    note: "vidéo seule",
+  },
 ];
 
 /** Décrit ce qui a été abandonné par rapport au rendu complet. */
@@ -21,6 +90,19 @@ export function describeDegradation(attempt: RenderAttempt, inputs: GraphInputs)
   if (!attempt.text && inputs.cues.length) lost.push("sous-titres");
   if (!attempt.voice && inputs.hasVoice) lost.push("voix off");
   if (!attempt.cuts && inputs.keeps.length > 1) lost.push("coupe des silences");
+  if (attempt.look === false && (inputs.filterId ?? "none") !== "none") {
+    lost.push("filtre visuel");
+  }
+  if (attempt.look === false && (inputs.upscale ?? "none") !== "none") {
+    lost.push("mise à l'échelle");
+  }
+  if (
+    attempt.transitions === false &&
+    (inputs.transition ?? "none") !== "none" &&
+    inputs.keeps.length > 1
+  ) {
+    lost.push("transitions");
+  }
   return lost;
 }
 
@@ -85,7 +167,26 @@ export async function renderWithFallback(
 
   let lastLogs = "";
 
-  for (const attempt of RENDER_ATTEMPTS) {
+  // Normalise les tentatives selon les options reellement demandees, puis
+  // retire les doublons : sans cela, on encoderait plusieurs fois le meme
+  // graphe (par exemple « complet » et « sans transitions » quand aucune
+  // transition n'est demandee).
+  const wantsLook = (inputs.filterId ?? "none") !== "none" || (inputs.upscale ?? "none") !== "none";
+  const wantsTransition = (inputs.transition ?? "none") !== "none" && inputs.keeps.length > 1;
+
+  const seen = new Set<string>();
+  const attempts = RENDER_ATTEMPTS.map((a) => ({
+    ...a,
+    look: wantsLook ? a.look !== false : false,
+    transitions: wantsTransition ? a.transitions !== false : false,
+  })).filter((a) => {
+    const key = `${a.masks}|${a.text}|${a.voice}|${a.cuts}|${a.look}|${a.transitions}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+
+  for (const attempt of attempts) {
     signal?.throwIfAborted();
 
     if (attempt.masks && !inputs.activeMasks.length) continue;

@@ -10,6 +10,9 @@ import {
 } from "@/lib/video/presets";
 import { SOURCE_LANGUAGES, type SourceLanguage } from "@/lib/languages";
 import { detectMaskZones } from "@/lib/video/detect";
+import { VIDEO_FILTERS, UPSCALE_MODES } from "@/lib/video/filters";
+import { renderPreviewFrame } from "@/lib/video/preview";
+import { TRANSITIONS } from "@/lib/video/transitions";
 import type { RenderOptions } from "@/lib/video/render-options";
 
 type Change = {
@@ -47,6 +50,41 @@ export function SettingsPanel({
   const [dims, setDims] = useState<{ w: number; h: number } | null>(null);
   const [detecting, setDetecting] = useState(false);
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewing, setPreviewing] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+
+  // L'URL d'objet precedente doit etre liberee, sinon chaque apercu fuit
+  // quelques centaines de kilo-octets.
+  useEffect(() => {
+    return () => {
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+    };
+  }, [previewUrl]);
+
+  const buildPreview = async () => {
+    setPreviewing(true);
+    setPreviewError(null);
+    try {
+      const url = await renderPreviewFrame(file.bytes, {
+        filterId: options.filterId,
+        upscale: options.upscale,
+        videoWidth: dims?.w ?? 0,
+        videoHeight: dims?.h ?? 0,
+        sampleText: "Aperçu des sous-titres",
+        preset: { ...preset, ...overrides, boxOpacity: options.subtitleOpacity },
+        atSecond: 1,
+      });
+      setPreviewUrl((old) => {
+        if (old) URL.revokeObjectURL(old);
+        return url;
+      });
+    } catch (e) {
+      setPreviewError(e instanceof Error ? e.message : "Aperçu impossible.");
+    } finally {
+      setPreviewing(false);
+    }
+  };
 
   useEffect(() => {
     const blob = new Blob([file.bytes as unknown as BlobPart], { type: "video/mp4" });
@@ -107,6 +145,146 @@ export function SettingsPanel({
               <span>{label}</span>
             </label>
           ))}
+        </div>
+
+        {/* ------------------------------ apparence ------------------------------ */}
+        <p className="mt-5 text-xs font-medium text-muted-foreground">Filtre visuel</p>
+        <div className="mt-2 flex flex-wrap gap-2">
+          {VIDEO_FILTERS.map((f) => (
+            <button
+              key={f.id}
+              onClick={() => setOption("filterId", f.id)}
+              title={f.description}
+              className={`rounded-full border px-3 py-1.5 text-xs transition ${
+                options.filterId === f.id
+                  ? "border-primary bg-primary/10 text-foreground"
+                  : "border-border text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {f.name}
+            </button>
+          ))}
+        </div>
+
+        <p className="mt-4 text-xs font-medium text-muted-foreground">Définition</p>
+        <div className="mt-2 flex flex-wrap gap-2">
+          {UPSCALE_MODES.map((m) => (
+            <button
+              key={m.id}
+              onClick={() => setOption("upscale", m.id)}
+              title={m.note}
+              className={`rounded-full border px-3 py-1.5 text-xs transition ${
+                options.upscale === m.id
+                  ? "border-primary bg-primary/10 text-foreground"
+                  : "border-border text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {m.name}
+            </button>
+          ))}
+        </div>
+        {options.upscale === "2160" && (
+          <p className="mt-2 text-xs text-amber-500">
+            La 4K multiplie par environ 4 le temps d'encodage et peut échouer sur mobile. Si le
+            rendu échoue, l'application repasse automatiquement en définition d'origine.
+          </p>
+        )}
+
+        <div className="mt-4 flex items-center justify-between">
+          <p className="text-xs font-medium text-muted-foreground">
+            Opacité du fond des sous-titres
+          </p>
+          <span className="text-xs tabular-nums text-muted-foreground">
+            {Math.round(options.subtitleOpacity * 100)} %
+          </span>
+        </div>
+        <input
+          type="range"
+          min={0}
+          max={1}
+          step={0.05}
+          value={options.subtitleOpacity}
+          onChange={(e) => setOption("subtitleOpacity", Number(e.target.value))}
+          className="mt-2 w-full accent-primary"
+        />
+        <p className="mt-1 text-xs text-muted-foreground">
+          0 % : aucun bandeau, seuls le contour et l'ombre assurent la lisibilité.
+        </p>
+
+        {/* ----------------------------- transitions ----------------------------- */}
+        <p className="mt-5 text-xs font-medium text-muted-foreground">
+          Transition entre les coupes
+        </p>
+        <div className="mt-2 flex flex-wrap gap-2">
+          {TRANSITIONS.map((t) => (
+            <button
+              key={t.id}
+              onClick={() => setOption("transition", t.id)}
+              disabled={!options.cutSilences && t.id !== "none"}
+              className={`rounded-full border px-3 py-1.5 text-xs transition disabled:cursor-not-allowed disabled:opacity-40 ${
+                options.transition === t.id
+                  ? "border-primary bg-primary/10 text-foreground"
+                  : "border-border text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {t.name}
+            </button>
+          ))}
+        </div>
+        {!options.cutSilences && (
+          <p className="mt-2 text-xs text-muted-foreground">
+            Les transitions nécessitent la coupe des silences : sans coupe, il n'y a rien à
+            raccorder.
+          </p>
+        )}
+        {options.transition !== "none" && (
+          <>
+            <div className="mt-3 flex items-center justify-between">
+              <p className="text-xs font-medium text-muted-foreground">Durée de la transition</p>
+              <span className="text-xs tabular-nums text-muted-foreground">
+                {options.transitionDuration.toFixed(2)} s
+              </span>
+            </div>
+            <input
+              type="range"
+              min={0.1}
+              max={1}
+              step={0.05}
+              value={options.transitionDuration}
+              onChange={(e) => setOption("transitionDuration", Number(e.target.value))}
+              className="mt-2 w-full accent-primary"
+            />
+            <p className="mt-1 text-xs text-muted-foreground">
+              Les sous-titres sont recalés automatiquement : un fondu raccourcit la vidéo.
+            </p>
+          </>
+        )}
+
+        {/* ------------------------------- aperçu -------------------------------- */}
+        <div className="mt-5 rounded-xl border border-border bg-background/40 p-3">
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-xs font-medium text-muted-foreground">Aperçu avant rendu</p>
+            <button
+              onClick={buildPreview}
+              disabled={previewing}
+              className="rounded-full border border-primary bg-primary/10 px-3 py-1.5 text-xs transition disabled:opacity-50"
+            >
+              {previewing ? "Génération…" : "Générer l'aperçu"}
+            </button>
+          </div>
+          {previewError && <p className="mt-2 text-xs text-destructive">{previewError}</p>}
+          {previewUrl ? (
+            <img
+              src={previewUrl}
+              alt="Aperçu du rendu avec les filtres et le style de sous-titres"
+              className="mt-3 w-full rounded-lg"
+            />
+          ) : (
+            <p className="mt-2 text-xs text-muted-foreground">
+              L'aperçu est calculé par FFmpeg sur une image de la vidéo : il reflète exactement le
+              rendu final, filtre et sous-titres compris.
+            </p>
+          )}
         </div>
 
         <p className="mt-4 text-xs font-medium text-muted-foreground">Moteur de voix off</p>

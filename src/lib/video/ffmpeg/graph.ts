@@ -1,3 +1,10 @@
+import { buildLookFilters, type UpscaleMode } from "../filters";
+import {
+  buildAcrossfadeChain,
+  buildXfadeChain,
+  transitionDurations,
+  type TransitionType,
+} from "../transitions";
 import type { Cue } from "../subtitles/cues";
 import type { MaskZone, SubtitlePreset } from "../presets";
 
@@ -15,6 +22,16 @@ export type GraphInputs = {
   hasVoice: boolean;
   mirror: boolean;
   remap: (t: number) => number;
+  /** Filtre colorimetrique facultatif. */
+  filterId?: string;
+  /** Mise a l'echelle facultative. */
+  upscale?: UpscaleMode;
+  videoWidth?: number;
+  videoHeight?: number;
+  /** Transition entre segments conserves. */
+  transition?: TransitionType;
+  /** Duree souhaitee de la transition, en secondes. */
+  transitionDuration?: number;
 };
 
 export type GraphToggles = {
@@ -22,6 +39,10 @@ export type GraphToggles = {
   text: boolean;
   voice: boolean;
   cuts: boolean;
+  /** Filtres et upscale, abandonnes en premier si le rendu echoue. */
+  look?: boolean;
+  /** Transitions, abandonnees avant les coupes elles-memes. */
+  transitions?: boolean;
 };
 
 /** Arrondit à un entier pair : libx264 refuse les dimensions impaires. */
@@ -48,10 +69,22 @@ export function resolveMasks(masks: MaskZone[], videoWidth: number, videoHeight:
     .slice(0, 4);
 }
 
+/** Applique une opacite a une couleur FFmpeg (`black`, `#RRGGBB`, `x@0.5`). */
+export function withOpacity(color: string, opacity: number): string {
+  const clamped = Math.min(1, Math.max(0, opacity));
+  const base = color.replace(/@[\d.]+$/, "");
+  return `${base}@${clamped.toFixed(2)}`;
+}
+
 export function buildStyleBits(preset: SubtitlePreset): string {
-  const boxColor = preset.boxColor.replace(/@[\d.]+$/, "@0.95");
+  // L'opacite du preset (ou de la surcharge utilisateur) est respectee.
+  // Auparavant elle etait ecrasee par `@0.95`, rendant tout style discret
+  // impossible : le fond restait un bandeau quasi opaque.
+  const opacity = preset.boxOpacity ?? 0.95;
+  const boxColor = withOpacity(preset.boxColor, opacity);
   const boxBorderW = Math.max(preset.boxBorderW, 16);
-  const useBox = preset.useBox !== false;
+  // Un fond totalement transparent n'a pas de sens : on desactive la boite.
+  const useBox = preset.useBox !== false && opacity > 0.01;
 
   return [
     `fontcolor=${preset.fontColor}`,
@@ -75,7 +108,10 @@ export function buildStyleBits(preset: SubtitlePreset): string {
  */
 function buildTextFilters(inputs: GraphInputs, withCuts: boolean): string {
   const { cues, subtitleFiles, preset, coverMask, subYAnchor, remap } = inputs;
-  const plateColor = preset.boxColor.replace(/@[\d.]+$/, "@0.92");
+  // La plaque masque le sous-titre d'origine : son opacite est independante
+  // de celle du fond du nouveau texte, sinon un style discret laisserait
+  // reapparaitre l'ancien sous-titre.
+  const plateColor = withOpacity(preset.boxColor, preset.plateOpacity ?? 0.92);
   const styleBits = buildStyleBits(preset);
 
   return cues
@@ -106,6 +142,15 @@ function buildTextFilters(inputs: GraphInputs, withCuts: boolean): string {
 export function buildGraph(inputs: GraphInputs, toggles: GraphToggles): string {
   const { activeMasks, keeps, hasAudio, hasVoice, mirror } = inputs;
   const cuts = toggles.cuts && keeps.length > 1;
+
+  // Transitions : uniquement s'il y a bien plusieurs segments a raccorder.
+  const transition = inputs.transition ?? "none";
+  const wantsTransition = toggles.transitions !== false && transition !== "none" && cuts;
+  const durations = wantsTransition
+    ? transitionDurations(keeps, inputs.transitionDuration ?? 0.3)
+    : keeps.map(() => 0);
+  const usesTransition = wantsTransition && durations.some((d) => d > 0);
+
   const text = toggles.text ? buildTextFilters(inputs, cuts) || "null" : "null";
 
   let graph = "";
@@ -118,12 +163,39 @@ export function buildGraph(inputs: GraphInputs, toggles: GraphToggles): string {
     videoIn = "vflip";
   }
 
+  // Le look s'applique avant les coupes : une seule passe sur le flux entier
+  // plutot qu'une par segment.
+  if (toggles.look !== false) {
+    const look = buildLookFilters(
+      inputs.filterId,
+      inputs.upscale ?? "none",
+      inputs.videoWidth ?? 0,
+      inputs.videoHeight ?? 0,
+    );
+    if (look) {
+      graph += `[${videoIn}]${look}[vlook];`;
+      videoIn = "vlook";
+    }
+  }
+
   if (cuts) {
     graph += `[${videoIn}]split=${keeps.length}${keeps.map((_, i) => `[cv${i}]`).join("")};`;
     keeps.forEach((keep, i) => {
       graph += `[cv${i}]trim=start=${keep.start.toFixed(3)}:end=${keep.end.toFixed(3)},setpts=PTS-STARTPTS[tv${i}];`;
     });
-    graph += `${keeps.map((_, i) => `[tv${i}]`).join("")}concat=n=${keeps.length}:v=1:a=0[vcut];`;
+
+    if (usesTransition) {
+      const chain = buildXfadeChain(
+        keeps.map((_, i) => `tv${i}`),
+        keeps,
+        durations,
+        transition,
+        "vcut",
+      );
+      graph += chain;
+    } else {
+      graph += `${keeps.map((_, i) => `[tv${i}]`).join("")}concat=n=${keeps.length}:v=1:a=0[vcut];`;
+    }
     videoIn = "vcut";
 
     if (hasAudio) {
@@ -131,7 +203,15 @@ export function buildGraph(inputs: GraphInputs, toggles: GraphToggles): string {
       keeps.forEach((keep, i) => {
         graph += `[ca${i}]atrim=start=${keep.start.toFixed(3)}:end=${keep.end.toFixed(3)},asetpts=PTS-STARTPTS[ta${i}];`;
       });
-      graph += `${keeps.map((_, i) => `[ta${i}]`).join("")}concat=n=${keeps.length}:v=0:a=1[acut];`;
+      // L'audio doit subir exactement le meme raccourcissement que la video,
+      // sinon l'image et le son derivent l'un par rapport a l'autre.
+      graph += usesTransition
+        ? buildAcrossfadeChain(
+            keeps.map((_, i) => `ta${i}`),
+            durations,
+            "acut",
+          )
+        : `${keeps.map((_, i) => `[ta${i}]`).join("")}concat=n=${keeps.length}:v=0:a=1[acut];`;
       audioIn = "acut";
     }
 
@@ -140,7 +220,13 @@ export function buildGraph(inputs: GraphInputs, toggles: GraphToggles): string {
       keeps.forEach((keep, i) => {
         graph += `[cw${i}]atrim=start=${keep.start.toFixed(3)}:end=${keep.end.toFixed(3)},asetpts=PTS-STARTPTS[tw${i}];`;
       });
-      graph += `${keeps.map((_, i) => `[tw${i}]`).join("")}concat=n=${keeps.length}:v=0:a=1[wcut];`;
+      graph += usesTransition
+        ? buildAcrossfadeChain(
+            keeps.map((_, i) => `tw${i}`),
+            durations,
+            "wcut",
+          )
+        : `${keeps.map((_, i) => `[tw${i}]`).join("")}concat=n=${keeps.length}:v=0:a=1[wcut];`;
       voiceIn = "wcut";
     }
   }

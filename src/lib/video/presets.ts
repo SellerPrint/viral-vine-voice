@@ -1,5 +1,8 @@
 import type { SourceLanguage } from "@/lib/languages";
 
+import type { UpscaleMode } from "./filters";
+import type { TransitionType } from "./transitions";
+
 export type SubtitlePreset = {
   id: string;
   name: string;
@@ -20,9 +23,42 @@ export type SubtitlePreset = {
   shadowColor?: string;
   shadowX?: number;
   shadowY?: number;
+  /**
+   * Opacite du fond, 0 = totalement transparent, 1 = opaque.
+   *
+   * Auparavant `buildStyleBits` forcait 0.95 quel que soit le preset : le
+   * bandeau noir etait donc toujours tres visible, meme sur un style concu
+   * pour etre discret.
+   */
+  boxOpacity?: number;
+  /** Opacite de la plaque qui recouvre les sous-titres d'origine. */
+  plateOpacity?: number;
 };
 
 export const SUBTITLE_PRESETS: SubtitlePreset[] = [
+  {
+    // Defaut volontairement sobre : aucun aplat de couleur, lisibilite
+    // assuree par un contour et une ombre plutot que par un bandeau opaque.
+    id: "discret",
+    name: "Discret (recommande)",
+    fontsize: 88,
+    lineSpacing: 16,
+    uppercase: false,
+    maxCharsPerLine: 24,
+    maxLines: 2,
+    fontColor: "white",
+    boxColor: "black@0.0",
+    boxBorderW: 0,
+    yAnchor: 0.8,
+    useBox: false,
+    borderW: 6,
+    borderColor: "black",
+    shadowColor: "black@0.45",
+    shadowX: 1,
+    shadowY: 2,
+    boxOpacity: 0,
+    plateOpacity: 0.85,
+  },
   {
     id: "capcut-classic",
     name: "CapCut Classic",
@@ -142,7 +178,18 @@ export const DEFAULT_MASKS: MaskZone[] = [
 ];
 
 export type SubtitleOverrides = Partial<
-  Pick<SubtitlePreset, "fontsize" | "maxCharsPerLine" | "maxLines" | "yAnchor" | "uppercase">
+  Pick<
+    SubtitlePreset,
+    | "fontsize"
+    | "maxCharsPerLine"
+    | "maxLines"
+    | "yAnchor"
+    | "uppercase"
+    | "fontColor"
+    | "boxColor"
+    | "boxOpacity"
+    | "borderW"
+  >
 >;
 
 /** Langue de sortie des sous-titres (et de la future voix off). */
@@ -188,6 +235,14 @@ export type PipelineOptions = {
   clonedVoiceId?: string;
   /** Effet miroir (flip horizontal) pour éviter la détection de doublon */
   mirror?: boolean;
+  /** Filtre colorimétrique (voir `filters.ts`) */
+  filterId?: string;
+  /** Mise à l'échelle façon « 4K » */
+  upscale?: UpscaleMode;
+  /** Transition entre segments après coupe des silences */
+  transition?: TransitionType;
+  /** Durée souhaitée de la transition, en secondes */
+  transitionDuration?: number;
 };
 
 export function resolvePreset(preset: SubtitlePreset, o: SubtitleOverrides): SubtitlePreset {
