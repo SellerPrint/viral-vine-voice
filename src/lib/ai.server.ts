@@ -110,7 +110,10 @@ const PROVIDERS: { env: string; baseUrl: string; model: string }[] = [
   {
     env: "GEMINI_API_KEY",
     baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai",
-    model: "gemini-2.0-flash",
+    // Google retire ses modeles vite : gemini-2.0-flash a ete arrete le
+    // 2026-06-01 et gemini-2.5-flash l'est le 2026-10-16. On vise donc un
+    // modele courant, et `MODEL_FALLBACKS` prend le relais s'il disparait.
+    model: "gemini-3.5-flash",
   },
   // Groq — gratuit, très rapide. https://console.groq.com/keys
   {
@@ -131,6 +134,25 @@ const PROVIDERS: { env: string; baseUrl: string; model: string }[] = [
     model: "google/gemini-2.5-flash",
   },
 ];
+
+/**
+ * Modeles de repli, essayes dans l'ordre si le modele configure a ete retire.
+ *
+ * Un modele arrete renvoie 404 / NOT_FOUND : sans repli, la traduction casse
+ * du jour au lendemain sans changement de code de notre cote.
+ */
+const MODEL_FALLBACKS: Record<string, string[]> = {
+  "generativelanguage.googleapis.com": [
+    "gemini-3.5-flash",
+    "gemini-2.5-flash",
+    "gemini-2.5-flash-lite",
+  ],
+};
+
+/** Vrai si l'erreur traduit un modele inexistant ou retire. */
+function isModelUnavailable(message: string): boolean {
+  return /404|NOT_FOUND|not found|is not supported|has been deprecated|shut down/i.test(message);
+}
 
 /**
  * Résout le fournisseur à utiliser.
@@ -290,15 +312,49 @@ export async function requestTranslations(
 
   const results: TranslationResult[] = [];
   let failed = 0;
+  let lastError: unknown;
+  // Modele courant : peut basculer sur un repli si celui d'origine est retire.
+  let active = provider;
 
   for (const batch of batches) {
     signal?.throwIfAborted();
     try {
       results.push(
-        ...(await requestTranslationBatch(provider, batch, sourceLanguage, targetLanguage, signal)),
+        ...(await requestTranslationBatch(active, batch, sourceLanguage, targetLanguage, signal)),
       );
     } catch (error) {
       if (signal?.aborted) throw error;
+
+      // Modele retire : on rejoue le lot sur le premier repli qui repond.
+      const message = error instanceof Error ? error.message : String(error);
+      const host = new URL(active.baseUrl).hostname;
+      const candidates = (MODEL_FALLBACKS[host] ?? []).filter((m) => m !== active.model);
+
+      if (isModelUnavailable(message) && candidates.length > 0) {
+        let recovered = false;
+        for (const model of candidates) {
+          try {
+            const retried = await requestTranslationBatch(
+              { ...active, model },
+              batch,
+              sourceLanguage,
+              targetLanguage,
+              signal,
+            );
+            console.warn(`Modele ${active.model} indisponible, bascule sur ${model}.`);
+            active = { ...active, model };
+            results.push(...retried);
+            recovered = true;
+            break;
+          } catch (retryError) {
+            if (signal?.aborted) throw retryError;
+            lastError = retryError;
+          }
+        }
+        if (recovered) continue;
+      }
+
+      lastError = error;
       console.error(`Traduction échouée sur un lot de ${batch.length} segments`, error);
       failed += batch.length;
       // Repli : on garde le texte source plutôt que de perdre le segment.
@@ -311,7 +367,12 @@ export async function requestTranslations(
   // Tous les lots ont échoué : rien n'a été traduit, autant le dire clairement
   // que de livrer une vidéo doublée dans la langue d'origine.
   if (segments.length > 0 && failed === segments.length) {
-    throw new Error("La traduction a échoué sur l'ensemble des segments.");
+    // Sans la cause, l'utilisateur ne peut rien faire : cle invalide, quota
+    // depasse et modele retire demandent trois actions differentes.
+    const cause = lastError instanceof Error ? lastError.message : String(lastError ?? "");
+    throw new Error(
+      `La traduction a échoué sur l'ensemble des segments.${cause ? ` Cause : ${cause}` : ""}`,
+    );
   }
 
   return { results, failed };

@@ -277,3 +277,123 @@ describe("compatibilité du schéma d'outil avec Gemini", () => {
     }
   });
 });
+
+describe("modèles retirés et remontée d'erreur", () => {
+  const GEMINI = {
+    apiKey: "k",
+    baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai",
+    model: "gemini-3.5-flash",
+  };
+  const SEGMENTS = [{ text: "bonjour", start: 0, end: 1 }];
+
+  function okResponse(translation: string) {
+    return {
+      ok: true,
+      json: async () => ({
+        choices: [
+          {
+            message: {
+              tool_calls: [
+                {
+                  function: {
+                    arguments: JSON.stringify({
+                      results: [{ translation, direction: "neutral" }],
+                    }),
+                  },
+                },
+              ],
+            },
+          },
+        ],
+      }),
+    };
+  }
+
+  const notFound = { ok: false, status: 404, text: async () => "model not found" };
+
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("le modèle Gemini par défaut n'est pas un modèle arrêté", () => {
+    process.env.GEMINI_API_KEY = "gem";
+    const model = resolveTranslationProvider()?.model ?? "";
+    delete process.env.GEMINI_API_KEY;
+    // Arrêtés par Google : 2.0-flash le 2026-06-01, 2.5-* le 2026-10-16.
+    expect(model).not.toMatch(/^gemini-2\.0-/);
+    expect(model).not.toMatch(/^gemini-1\./);
+  });
+
+  it("bascule sur un modèle de repli quand le modèle configuré renvoie 404", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(notFound)
+      .mockResolvedValueOnce(okResponse("hello"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { results, failed } = await requestTranslations(GEMINI, SEGMENTS, "French", "English");
+
+    expect(failed).toBe(0);
+    expect(results[0].text).toBe("hello");
+    const second = JSON.parse(fetchMock.mock.calls[1][1].body as string);
+    expect(second.model).not.toBe(GEMINI.model);
+  });
+
+  it("réutilise le modèle de repli pour les lots suivants", async () => {
+    const many = Array.from({ length: TRANSLATION_BATCH_SIZE + 1 }, (_, i) => ({
+      text: `s${i}`,
+      start: i,
+      end: i + 1,
+    }));
+    const batchOk = (n: number) => ({
+      ok: true,
+      json: async () => ({
+        choices: [
+          {
+            message: {
+              tool_calls: [
+                {
+                  function: {
+                    arguments: JSON.stringify({
+                      results: Array.from({ length: n }, () => ({
+                        translation: "x",
+                        direction: "neutral",
+                      })),
+                    }),
+                  },
+                },
+              ],
+            },
+          },
+        ],
+      }),
+    });
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(notFound)
+      .mockResolvedValueOnce(batchOk(TRANSLATION_BATCH_SIZE))
+      .mockResolvedValueOnce(batchOk(1));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { failed } = await requestTranslations(GEMINI, many, "French", "English");
+
+    expect(failed).toBe(0);
+    // 3 appels seulement : le repli n'est pas redécouvert au 2e lot.
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    const third = JSON.parse(fetchMock.mock.calls[2][1].body as string);
+    expect(third.model).not.toBe(GEMINI.model);
+  });
+
+  it("remonte la cause réelle quand tous les lots échouent", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 429,
+        text: async () => "RESOURCE_EXHAUSTED: quota depasse",
+      }),
+    );
+
+    await expect(requestTranslations(GEMINI, SEGMENTS, "French", "English")).rejects.toThrow(
+      /quota depasse/,
+    );
+  });
+});
