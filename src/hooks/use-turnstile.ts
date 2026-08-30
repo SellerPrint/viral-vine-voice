@@ -67,15 +67,29 @@ export function useTurnstile() {
   const siteKey = import.meta.env.VITE_TURNSTILE_SITE_KEY as string | undefined;
   const enabled = Boolean(siteKey);
 
-  const containerRef = useRef<HTMLDivElement | null>(null);
   const widgetIdRef = useRef<string | null>(null);
+  const [container, setContainer] = useState<HTMLDivElement | null>(null);
   const [token, setToken] = useState<string | undefined>(undefined);
   const [failed, setFailed] = useState(false);
 
+  /**
+   * Callback ref plutôt que `useRef`.
+   *
+   * Le conteneur n'est monté qu'une fois une vidéo importée. Avec un `useRef`,
+   * l'effet s'exécutait au premier rendu — quand `ref.current` valait encore
+   * `null` — puis ne se relançait jamais, ses dépendances (`enabled`,
+   * `siteKey`) étant inchangées et une ref ne provoquant pas de re-rendu. Le
+   * widget n'était donc jamais rendu : ni jeton, ni erreur, et un bouton
+   * définitivement grisé. Passer par un state force l'effet à se relancer au
+   * moment exact où le nœud entre dans le DOM.
+   */
+  const containerRef = useCallback((node: HTMLDivElement | null) => {
+    setContainer(node);
+  }, []);
+
   useEffect(() => {
-    if (!enabled || !containerRef.current) return;
+    if (!enabled || !container) return;
     let cancelled = false;
-    const container = containerRef.current;
 
     loadScript()
       .then(() => {
@@ -110,7 +124,7 @@ export function useTurnstile() {
       }
       widgetIdRef.current = null;
     };
-  }, [enabled, siteKey]);
+  }, [enabled, siteKey, container]);
 
   const reset = useCallback(() => {
     setToken(undefined);
