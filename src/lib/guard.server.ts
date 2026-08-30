@@ -125,9 +125,7 @@ export async function verifyTurnstile(token: string | undefined): Promise<void> 
     // En production, laisser passer reviendrait à offrir un proxy ElevenLabs
     // anonyme et gratuit. On échoue explicitement plutôt que silencieusement.
     if (isProductionDeployment()) {
-      throw new Error(
-        "Configuration incomplète : TURNSTILE_SECRET_KEY est requis en production.",
-      );
+      throw new Error("Configuration incomplète : TURNSTILE_SECRET_KEY est requis en production.");
     }
     // En local, on laisse passer pour ne pas casser le développement.
     // La limitation de débit reste active dans tous les cas.
