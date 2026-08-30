@@ -87,7 +87,10 @@ export function SettingsPanel({
   };
 
   useEffect(() => {
-    const blob = new Blob([file.bytes as unknown as BlobPart], { type: "video/mp4" });
+    // `slice()` protege contre un buffer detache : si un apercu ou un rendu a
+    // transfere `file.bytes` au worker FFmpeg, `new Blob` sur la vue detachee
+    // produirait une video vide.
+    const blob = new Blob([file.bytes.slice() as unknown as BlobPart], { type: "video/mp4" });
     const url = URL.createObjectURL(blob);
     setVideoBlob(blob);
     setVideoUrl(url);

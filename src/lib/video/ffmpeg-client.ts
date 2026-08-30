@@ -55,6 +55,43 @@ export async function getFfmpeg(onLog?: (m: string) => void, onProgress?: (p: nu
 }
 
 /**
+ * Écrit un fichier dans le FS virtuel **sans détacher** le buffer de l'appelant.
+ *
+ * `FFmpeg.writeFile()` place `data.buffer` dans la liste des objets
+ * transférables de `postMessage`. Le buffer est donc *déplacé* vers le worker :
+ * côté appelant il devient détaché (`byteLength === 0`) et tout réemploi
+ * échoue avec
+ *
+ *   « Failed to execute 'postMessage' on 'Worker': An ArrayBuffer is detached
+ *     and could not be cloned. »
+ *
+ * C'est invisible tant qu'un octet n'est écrit qu'une fois. Ça ne l'est plus
+ * dès qu'on réutilise la même source : générer un aperçu puis lancer le rendu,
+ * enchaîner deux rendus, ou réécrire la police mise en cache.
+ *
+ * On transmet donc systématiquement une copie : c'est le worker qui la
+ * consomme, l'original reste intact.
+ */
+export async function writeFileSafe(ff: FFmpegType, path: string, data: Uint8Array): Promise<void> {
+  // Un buffer déjà détaché ne peut plus être copié : `slice()` lèverait un
+  // `TypeError` peu parlant. On préfère un message qui dit quoi faire.
+  if (data.byteLength === 0 && data.length === 0) {
+    throw new Error(
+      `Les données de « ${path} » ne sont plus disponibles en mémoire. ` +
+        `Réimporte la vidéo et relance le rendu.`,
+    );
+  }
+  // `slice()` alloue un nouveau buffer : seul celui-ci est transféré au worker,
+  // l'original reste utilisable par l'appelant.
+  await ff.writeFile(path, data.slice());
+}
+
+/** Vrai si le buffer sous-jacent a été transféré à un worker. */
+export function isDetached(data: Uint8Array): boolean {
+  return data.byteLength === 0 && data.buffer.byteLength === 0;
+}
+
+/**
  * Libère le worker et le tas WebAssembly.
  *
  * Emscripten ne rend jamais sa mémoire au système : sans terminaison

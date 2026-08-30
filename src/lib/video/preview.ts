@@ -10,7 +10,7 @@
  * video entiere.
  */
 import { buildLookFilters, type UpscaleMode } from "./filters";
-import { getFfmpeg } from "./ffmpeg-client";
+import { getFfmpeg, writeFileSafe } from "./ffmpeg-client";
 import { loadFont } from "./font";
 import { buildStyleBits, withOpacity } from "./ffmpeg/graph";
 import type { SubtitlePreset } from "./presets";
@@ -58,7 +58,9 @@ export async function renderPreviewFrame(
   const output = "preview-out.jpg";
   const textFile = "preview-text.txt";
 
-  await ff.writeFile(input, videoBytes);
+  // Copie imperative : le meme `videoBytes` sera reutilise au prochain
+  // apercu et surtout par le rendu final.
+  await writeFileSafe(ff, input, videoBytes);
 
   try {
     const chain: string[] = [];
@@ -71,7 +73,7 @@ export async function renderPreviewFrame(
     if (sampleText && preset) {
       // `drawtext` echoue sans fichier de police dans le systeme de fichiers
       // virtuel : le rendu l'ecrit de son cote, l'apercu doit faire de meme.
-      await ff.writeFile("font.ttf", await loadFont(signal));
+      await writeFileSafe(ff, "font.ttf", await loadFont(signal));
       const wrapped = wrapLines(
         preset.uppercase ? sampleText.toUpperCase() : sampleText,
         preset.maxCharsPerLine,

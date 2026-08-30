@@ -5,7 +5,7 @@ import { DEFAULT_SOURCE_LANGUAGE } from "@/lib/languages";
 import { composeNarrationWav } from "./audio/narration";
 import { planSilenceCuts } from "./audio/silence-plan";
 import { detectSilences, keptIntervals } from "./audio/wav";
-import { getFfmpeg } from "./ffmpeg-client";
+import { getFfmpeg, writeFileSafe } from "./ffmpeg-client";
 import { loadFont } from "./font";
 import { resolveMasks, type GraphInputs } from "./ffmpeg/graph";
 import { renderWithFallback } from "./ffmpeg/render";
@@ -57,7 +57,8 @@ export async function runPipeline(
     cleanupNames.add("audio.wav");
 
     progress("upload", "Import du fichier…");
-    await ff.writeFile(inputName, input.bytes);
+    // Copie : `input.bytes` sert aussi a l'apercu et au lecteur video.
+    await writeFileSafe(ff, inputName, input.bytes);
     signal?.throwIfAborted();
 
     progress("extract", "Extraction audio…");
@@ -188,7 +189,9 @@ export async function runPipeline(
 
     progress("compose", "Chargement de la police…");
     cleanupNames.add("font.ttf");
-    await ff.writeFile("font.ttf", await loadFont(signal));
+    // La police est mise en cache pour la session : la transferer la
+    // detacherait des le deuxieme rendu.
+    await writeFileSafe(ff, "font.ttf", await loadFont(signal));
 
     /* ------------------------------- masques -------------------------------- */
     const sizeMatch = probe.match(/Video:.*?[\s,](\d{2,5})x(\d{2,5})/);
@@ -208,7 +211,7 @@ export async function runPipeline(
 
     if (voiceWav) {
       cleanupNames.add("voice.wav");
-      await ff.writeFile("voice.wav", voiceWav);
+      await writeFileSafe(ff, "voice.wav", voiceWav);
     }
 
     // Les fondus font se recouvrir les segments : le remappage des sous-titres
