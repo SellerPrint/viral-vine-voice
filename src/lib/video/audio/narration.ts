@@ -3,6 +3,7 @@ import { base64ToBytes, exactArrayBuffer } from "@/lib/base64";
 import { mapLimit } from "@/lib/concurrency";
 import { DEFAULT_AI33_VOICE, resolveSpeakerVoice } from "@/lib/voices";
 
+import { planNarrationClips, planOvershoot } from "./narration-plan";
 import { encodeWav } from "./wav";
 import type { Segment } from "../subtitles/cues";
 import type { TtsProvider } from "../presets";
@@ -15,6 +16,11 @@ export type NarrationResult = {
   failed: number;
   /** Nombre de segments traités. */
   total: number;
+  /**
+   * Secondes de parole qui ne tiennent pas dans la durée de la vidéo, même
+   * après accélération maximale. Au-delà de zéro, la fin serait tronquée.
+   */
+  overshoot: number;
 };
 
 /** Concurrence des appels TTS : au-delà, le fournisseur limite le débit. */
@@ -43,7 +49,7 @@ export async function composeNarrationWav(
   signal?: AbortSignal,
 ): Promise<NarrationResult> {
   const usable = segments.filter((s) => s.textEn.trim().length > 1);
-  if (!usable.length || !duration) return { wav: null, failed: 0, total: 0 };
+  if (!usable.length || !duration) return { wav: null, failed: 0, total: 0, overshoot: 0 };
 
   const resolveVoiceId = (segment: Segment) =>
     voice.provider === "ai33"
@@ -88,7 +94,7 @@ export async function composeNarrationWav(
   const successes = synthesized.filter((r) => r.ok);
   const failed = synthesized.length - successes.length;
 
-  if (!successes.length) return { wav: null, failed, total: usable.length };
+  if (!successes.length) return { wav: null, failed, total: usable.length, overshoot: 0 };
 
   // Décodage après coup : un seul AudioContext, correctement fermé.
   const decodeCtx = new AudioContext();
@@ -112,26 +118,35 @@ export async function composeNarrationWav(
   }
 
   if (!clips.length) {
-    return { wav: null, failed: failed + decodeFailures, total: usable.length };
+    return { wav: null, failed: failed + decodeFailures, total: usable.length, overshoot: 0 };
   }
 
   const sampleRate = 24000;
-  const tail = Math.max(duration, ...clips.map((c) => c.start + c.buffer.duration));
+
+  // Placement calcule : sans cela, un clip plus long que son segment mordait
+  // sur le suivant, decalait toute la suite, et la fin de la narration sortait
+  // de la video — d'ou des sous-titres sans voix off sur les derniers plans.
+  const plan = planNarrationClips(
+    clips.map((clip) => ({
+      start: clip.start,
+      end: clip.start + clip.slot,
+      duration: clip.buffer.duration,
+    })),
+    duration,
+  );
+
+  const overshoot = planOvershoot(plan, duration);
+  const tail = Math.max(duration, ...plan.map((p) => p.start + p.playedDuration));
   const offline = new OfflineAudioContext(1, Math.ceil((tail + 1) * sampleRate), sampleRate);
 
-  for (const clip of clips) {
+  clips.forEach((clip, index) => {
+    const placement = plan[index];
     const source = offline.createBufferSource();
     source.buffer = clip.buffer;
-
-    // Accélère légèrement si le clip déborde de son créneau, sans coupure
-    // brutale (qui produirait un clic audible).
-    if (clip.buffer.duration > clip.slot + 0.1) {
-      source.playbackRate.value = Math.min(1.2, clip.buffer.duration / clip.slot);
-    }
-
+    source.playbackRate.value = placement.rate;
     source.connect(offline.destination);
-    source.start(clip.start);
-  }
+    source.start(placement.start);
+  });
 
   const rendered = await offline.startRendering();
 
@@ -139,5 +154,6 @@ export async function composeNarrationWav(
     wav: encodeWav(rendered.getChannelData(0), sampleRate),
     failed: failed + decodeFailures,
     total: usable.length,
+    overshoot,
   };
 }

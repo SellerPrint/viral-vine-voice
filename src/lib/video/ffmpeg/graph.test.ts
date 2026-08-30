@@ -202,3 +202,32 @@ describe("masquage du sous-titre d'origine (régressions)", () => {
     expect(graph).toMatch(/boxblur=40:3,drawbox=[^[]*t=fill/);
   });
 });
+
+describe("durée de la piste de voix off", () => {
+  const base = {
+    cues: [],
+    subtitleFiles: [],
+    preset: SUBTITLE_PRESETS[0],
+    coverMask: undefined,
+    subYAnchor: 0.8,
+    activeMasks: [],
+    keeps: [{ start: 0, end: 10 }],
+    mirror: false,
+    remap: (t: number) => t,
+  };
+  const toggles = { masks: false, text: false, voice: true, cuts: false };
+
+  it("ne tronque plus la voix off quand elle dépasse l'audio d'origine", () => {
+    // `duration=first` calait le mixage sur l'audio source : une voix off plus
+    // longue (traduction plus verbeuse) voyait sa fin supprimée.
+    const graph = buildGraph({ ...base, hasAudio: true, hasVoice: true } as never, toggles);
+    expect(graph).toContain("amix=inputs=2:duration=longest");
+    expect(graph).not.toContain("duration=first");
+  });
+
+  it("produit bien une piste de sortie quand l'audio d'origine est supprimé", () => {
+    // Cas par défaut de l'application : removeOriginalAudio = true.
+    const graph = buildGraph({ ...base, hasAudio: false, hasVoice: true } as never, toggles);
+    expect(graph).toContain("[aout]");
+  });
+});

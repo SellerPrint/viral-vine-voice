@@ -191,16 +191,26 @@ async function requestTranslationBatch(
   targetLanguage: string,
   signal?: AbortSignal,
 ) {
+  // Budget de mots par segment : la voix de synthese lit ~2,8 mots/seconde et
+  // n'est acceleree qu'a 1,2x maximum. Au-dela de ce budget, l'audio deborde
+  // de son creneau, decale les segments suivants et finit tronque.
+  const WORDS_PER_SECOND = 2.8;
+  const MAX_SPEED = 1.2;
+  const wordBudget = (segment: TimedText) =>
+    Math.max(2, Math.floor((segment.end - segment.start) * WORDS_PER_SECOND * MAX_SPEED));
+
   const prompt = `Translate these ${sourceLanguage} segments for a dubbed video in ${targetLanguage}.
 For each segment, provide:
-1. The translation: natural, concise, matching the duration. Use Sentence Case (only first letter and names capitalized).
+1. The translation. It MUST fit the spoken duration: respect the word budget given for each segment. Prefer a shorter, punchier phrasing over a literal translation. Drop filler words rather than exceed the budget. Use Sentence Case (only first letter and names capitalized).
 2. The emotional direction: one of [neutral, energetic, excited, serious, soft].
+
+The word budget is a hard limit, not a suggestion: a translation that is too long gets cut off in the final video.
 
 Return exactly ${segments.length} JSON objects in the 'results' array.
 Do not include numbering, quotes, or literal newlines in the text.
 
 SEGMENTS:
-${segments.map((segment, index) => `[${index + 1}] (${(segment.end - segment.start).toFixed(2)}s): ${segment.text}`).join("\n")}`;
+${segments.map((segment, index) => `[${index + 1}] (${(segment.end - segment.start).toFixed(2)}s, max ${wordBudget(segment)} words): ${segment.text}`).join("\n")}`;
 
   const response = await fetch(`${provider.baseUrl}/chat/completions`, {
     method: "POST",

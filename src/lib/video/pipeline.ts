@@ -148,6 +148,16 @@ export async function runPipeline(
       );
     }
 
+    // La traduction peut etre physiquement trop longue pour la duree de la
+    // video : a 1,2x maximum, on ne fait pas entrer 15 s de parole dans 10 s.
+    // Le dire franchement vaut mieux qu'une fin muette inexpliquee.
+    if (narration.overshoot > 0.3) {
+      warnings.push(
+        `La voix off dépasse d'environ ${narration.overshoot.toFixed(1)} s : la traduction est plus longue que la vidéo. ` +
+          `La narration a été accélérée au maximum. Pour un meilleur résultat, raccourcis la vidéo ou choisis une langue plus concise.`,
+      );
+    }
+
     const voiceWav = narration.wav;
     signal?.throwIfAborted();
 

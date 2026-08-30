@@ -252,7 +252,11 @@ export function buildGraph(inputs: GraphInputs, toggles: GraphToggles): string {
 
   if (toggles.voice && hasVoice) {
     graph += hasAudio
-      ? `;[${audioIn}]volume=0.15,aresample=44100[a0];[${voiceIn}]volume=1.8,aresample=44100[a1];[a0][a1]amix=inputs=2:duration=first:dropout_transition=0,alimiter=limit=0.9[aout]`
+      ? // `duration=first` calait le mixage sur l'audio d'origine : si la voix
+        // off etait plus longue (traduction plus verbeuse que la source), sa fin
+        // etait purement supprimee. `longest` conserve les deux pistes ; la video
+        // reste la reference de duree grace a `-shortest` cote encodeur.
+        `;[${audioIn}]volume=0.15,aresample=44100[a0];[${voiceIn}]volume=1.8,aresample=44100[a1];[a0][a1]amix=inputs=2:duration=longest:dropout_transition=0,alimiter=limit=0.9[aout]`
       : `;[${voiceIn}]volume=1.4,aresample=44100[aout]`;
   } else if (hasAudio) {
     graph += `;[${audioIn}]volume=1,aresample=44100[aout]`;

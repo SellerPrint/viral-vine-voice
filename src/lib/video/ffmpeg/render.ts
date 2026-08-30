@@ -209,8 +209,15 @@ export async function renderWithFallback(
     const args = ["-y", "-i", inputName];
     if (useVoice && voiceFile) args.push("-i", voiceFile);
     args.push("-filter_complex", graph, "-map", "[vout]");
-    if (graph.includes("[aout]")) args.push("-map", "[aout]", "-c:a", "aac", "-b:a", "128k");
-    else args.push("-an");
+    if (graph.includes("[aout]")) {
+      args.push("-map", "[aout]", "-c:a", "aac", "-b:a", "128k");
+      // La video reste la reference de duree. `amix=duration=longest` evite de
+      // tronquer une voix off plus longue que l'audio source, et `-shortest`
+      // empeche en retour d'allonger la video au-dela de son dernier cadre.
+      args.push("-shortest");
+    } else {
+      args.push("-an");
+    }
     args.push(
       "-c:v",
       "libx264",
