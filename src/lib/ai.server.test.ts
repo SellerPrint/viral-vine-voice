@@ -1,6 +1,12 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { requestTranslations, TRANSLATION_BATCH_SIZE } from "./ai.server";
+import {
+  requestTranslations,
+  resolveTranslationProvider,
+  TRANSLATION_BATCH_SIZE,
+} from "./ai.server";
+
+const PROVIDER = { apiKey: "k", baseUrl: "https://example.test/v1", model: "test-model" };
 
 /** Réponse Gemini valide pour `count` segments. */
 const okResponse = (count: number) => ({
@@ -37,7 +43,12 @@ describe("requestTranslations — découpage en lots", () => {
     const fetchMock = vi.fn().mockResolvedValue(okResponse(10));
     vi.stubGlobal("fetch", fetchMock);
 
-    const { results, failed } = await requestTranslations("k", segments(10), "French", "English");
+    const { results, failed } = await requestTranslations(
+      PROVIDER,
+      segments(10),
+      "French",
+      "English",
+    );
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(results).toHaveLength(10);
@@ -53,7 +64,7 @@ describe("requestTranslations — découpage en lots", () => {
       .mockResolvedValueOnce(okResponse(3));
     vi.stubGlobal("fetch", fetchMock);
 
-    const { results } = await requestTranslations("k", segments(total), "French", "English");
+    const { results } = await requestTranslations(PROVIDER, segments(total), "French", "English");
 
     expect(fetchMock).toHaveBeenCalledTimes(3);
     expect(results).toHaveLength(total);
@@ -68,7 +79,7 @@ describe("requestTranslations — découpage en lots", () => {
       .mockResolvedValueOnce(okResponse(TRANSLATION_BATCH_SIZE + 1));
     vi.stubGlobal("fetch", fetchMock);
 
-    const { results, failed } = await requestTranslations("k", segments(total), "fr", "en");
+    const { results, failed } = await requestTranslations(PROVIDER, segments(total), "fr", "en");
 
     expect(results).toHaveLength(total);
     expect(failed).toBe(TRANSLATION_BATCH_SIZE);
@@ -82,7 +93,7 @@ describe("requestTranslations — découpage en lots", () => {
   it("lève si absolument tous les lots échouent", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, text: async () => "boom" }));
 
-    await expect(requestTranslations("k", segments(5), "fr", "en")).rejects.toThrow(
+    await expect(requestTranslations(PROVIDER, segments(5), "fr", "en")).rejects.toThrow(
       /ensemble des segments/,
     );
   });
@@ -93,12 +104,121 @@ describe("requestTranslations — découpage en lots", () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(okResponse(5)));
 
     await expect(
-      requestTranslations("k", segments(5), "fr", "en", controller.signal),
+      requestTranslations(PROVIDER, segments(5), "fr", "en", controller.signal),
     ).rejects.toThrow();
   });
 
   it("nettoie les retours à la ligne des traductions", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          choices: [
+            {
+              message: {
+                tool_calls: [
+                  {
+                    function: {
+                      arguments: JSON.stringify({
+                        results: [{ translation: "ligne\nsuivante   ici", direction: "neutral" }],
+                      }),
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        }),
+      }),
+    );
+
+    const { results } = await requestTranslations(PROVIDER, segments(1), "fr", "en");
+    expect(results[0].text).toBe("ligne suivante ici");
+  });
+});
+
+describe("resolveTranslationProvider", () => {
+  const KEYS = [
+    "TRANSLATION_API_KEY",
+    "TRANSLATION_BASE_URL",
+    "TRANSLATION_MODEL",
+    "GEMINI_API_KEY",
+    "GROQ_API_KEY",
+    "OPENROUTER_API_KEY",
+    "LOVABLE_API_KEY",
+  ];
+  let saved: Record<string, string | undefined>;
+
+  beforeEach(() => {
+    saved = Object.fromEntries(KEYS.map((k) => [k, process.env[k]]));
+    for (const k of KEYS) delete process.env[k];
+  });
+  afterEach(() => {
+    for (const [k, v] of Object.entries(saved)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  });
+
+  it("retourne null si aucune clé n'est définie", () => {
+    expect(resolveTranslationProvider()).toBeNull();
+  });
+
+  it("préfère Gemini quand plusieurs clés coexistent", () => {
+    process.env.LOVABLE_API_KEY = "lov";
+    process.env.GROQ_API_KEY = "groq";
+    process.env.GEMINI_API_KEY = "gem";
+    const p = resolveTranslationProvider();
+    expect(p?.apiKey).toBe("gem");
+    expect(p?.baseUrl).toContain("generativelanguage.googleapis.com");
+  });
+
+  it("retombe sur Groq si Gemini est absent", () => {
+    process.env.GROQ_API_KEY = "groq";
+    expect(resolveTranslationProvider()?.baseUrl).toContain("api.groq.com");
+  });
+
+  it("reste compatible avec LOVABLE_API_KEY seul", () => {
+    process.env.LOVABLE_API_KEY = "lov";
+    const p = resolveTranslationProvider();
+    expect(p?.apiKey).toBe("lov");
+    expect(p?.baseUrl).toContain("ai.gateway.lovable.dev");
+  });
+
+  it("permet de surcharger l'URL et le modèle", () => {
+    process.env.GEMINI_API_KEY = "gem";
+    process.env.TRANSLATION_MODEL = "gemini-2.5-flash";
+    expect(resolveTranslationProvider()?.model).toBe("gemini-2.5-flash");
+  });
+
+  it("accepte un fournisseur libre via TRANSLATION_API_KEY", () => {
+    process.env.TRANSLATION_API_KEY = "libre";
+    process.env.TRANSLATION_BASE_URL = "https://mon-proxy.test/v1";
+    process.env.TRANSLATION_MODEL = "mon-modele";
+    expect(resolveTranslationProvider()).toEqual({
+      apiKey: "libre",
+      baseUrl: "https://mon-proxy.test/v1",
+      model: "mon-modele",
+    });
+  });
+});
+
+describe("compatibilité du schéma d'outil avec Gemini", () => {
+  /** Collecte tous les sous-schémas du payload envoyé au fournisseur. */
+  function collectNodes(node: unknown, out: Record<string, unknown>[] = []) {
+    if (Array.isArray(node)) {
+      for (const item of node) collectNodes(item, out);
+    } else if (node && typeof node === "object") {
+      const record = node as Record<string, unknown>;
+      if ("type" in record || "enum" in record || "properties" in record) out.push(record);
+      for (const value of Object.values(record)) collectNodes(value, out);
+    }
+    return out;
+  }
+
+  async function captureToolSchema() {
+    const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({
         choices: [
@@ -108,7 +228,7 @@ describe("requestTranslations — découpage en lots", () => {
                 {
                   function: {
                     arguments: JSON.stringify({
-                      results: [{ translation: "ligne\nsuivante   ici", direction: "neutral" }],
+                      results: [{ translation: "hi", direction: "neutral" }],
                     }),
                   },
                 },
@@ -117,9 +237,43 @@ describe("requestTranslations — découpage en lots", () => {
           },
         ],
       }),
-    }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    await requestTranslations(PROVIDER, [{ text: "salut", start: 0, end: 1 }], "French", "English");
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    return body.tools[0].function.parameters;
+  }
 
-    const { results } = await requestTranslations("k", segments(1), "fr", "en");
-    expect(results[0].text).toBe("ligne suivante ici");
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("n'utilise ni minItems ni maxItems (rejetés par Gemini)", async () => {
+    const schema = await captureToolSchema();
+    const serialized = JSON.stringify(schema);
+    expect(serialized).not.toContain("minItems");
+    expect(serialized).not.toContain("maxItems");
+  });
+
+  it("déclare un type explicite sur chaque nœud, y compris les enum", async () => {
+    const schema = await captureToolSchema();
+    for (const node of collectNodes(schema)) {
+      expect(node.type, `nœud sans type : ${JSON.stringify(node)}`).toBeDefined();
+      if ("enum" in node) expect(node.type).toBe("string");
+    }
+  });
+
+  it("n'utilise aucun mot-clé JSON Schema non supporté par Gemini", async () => {
+    const serialized = JSON.stringify(await captureToolSchema());
+    for (const keyword of [
+      "additionalProperties",
+      "patternProperties",
+      "const",
+      "$ref",
+      "oneOf",
+      "allOf",
+      "exclusiveMinimum",
+      "exclusiveMaximum",
+    ]) {
+      expect(serialized, `mot-clé interdit : ${keyword}`).not.toContain(keyword);
+    }
   });
 });

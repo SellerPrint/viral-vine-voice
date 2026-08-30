@@ -6,6 +6,7 @@ import {
   requestSpeech,
   requestTranscription,
   requestTranslations,
+  resolveTranslationProvider,
 } from "./ai.server";
 import { consumeTtsBudget, guard, requestSignal } from "./guard.server";
 
@@ -32,11 +33,16 @@ export const translateSegments = createServerFn({ method: "POST" })
     await guard("translate", data.turnstileToken);
     const signal = requestSignal();
 
-    const apiKey = process.env.LOVABLE_API_KEY;
-    if (!apiKey) throw new Error("Clé API de traduction manquante (LOVABLE_API_KEY).");
+    const provider = resolveTranslationProvider();
+    if (!provider) {
+      throw new Error(
+        "Clé API de traduction manquante. Définis GEMINI_API_KEY (gratuit : " +
+          "https://aistudio.google.com/apikey), GROQ_API_KEY ou OPENROUTER_API_KEY.",
+      );
+    }
 
     const { results, failed } = await requestTranslations(
-      apiKey,
+      provider,
       data.segments,
       data.sourceLanguage,
       data.targetLanguage,

@@ -96,9 +96,74 @@ export async function requestTranscription(
   };
 }
 
+/**
+ * Fournisseur de traduction.
+ *
+ * N'importe quelle API compatible OpenAI (`/v1/chat/completions`) convient.
+ * On détecte la première clé disponible, du plus recommandé au plus ancien,
+ * ce qui permet de changer de fournisseur sans toucher au code.
+ */
+export type TranslationProvider = { apiKey: string; baseUrl: string; model: string };
+
+const PROVIDERS: { env: string; baseUrl: string; model: string }[] = [
+  // Google AI Studio — gratuit, sans carte bancaire. https://aistudio.google.com/apikey
+  {
+    env: "GEMINI_API_KEY",
+    baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai",
+    model: "gemini-2.0-flash",
+  },
+  // Groq — gratuit, très rapide. https://console.groq.com/keys
+  {
+    env: "GROQ_API_KEY",
+    baseUrl: "https://api.groq.com/openai/v1",
+    model: "llama-3.3-70b-versatile",
+  },
+  // OpenRouter — modèles `:free`. https://openrouter.ai/keys
+  {
+    env: "OPENROUTER_API_KEY",
+    baseUrl: "https://openrouter.ai/api/v1",
+    model: "meta-llama/llama-3.3-70b-instruct:free",
+  },
+  // Passerelle Lovable — historique, facturée sur les crédits du workspace.
+  {
+    env: "LOVABLE_API_KEY",
+    baseUrl: "https://ai.gateway.lovable.dev/v1",
+    model: "google/gemini-2.5-flash",
+  },
+];
+
+/**
+ * Résout le fournisseur à utiliser.
+ *
+ * `TRANSLATION_BASE_URL` / `TRANSLATION_MODEL` permettent de surcharger le
+ * couple détecté, ou d'utiliser un fournisseur absent de la liste avec
+ * `TRANSLATION_API_KEY`.
+ */
+export function resolveTranslationProvider(): TranslationProvider | null {
+  const custom = process.env.TRANSLATION_API_KEY;
+  if (custom) {
+    return {
+      apiKey: custom,
+      baseUrl: process.env.TRANSLATION_BASE_URL ?? PROVIDERS[0].baseUrl,
+      model: process.env.TRANSLATION_MODEL ?? PROVIDERS[0].model,
+    };
+  }
+  for (const candidate of PROVIDERS) {
+    const apiKey = process.env[candidate.env];
+    if (apiKey) {
+      return {
+        apiKey,
+        baseUrl: process.env.TRANSLATION_BASE_URL ?? candidate.baseUrl,
+        model: process.env.TRANSLATION_MODEL ?? candidate.model,
+      };
+    }
+  }
+  return null;
+}
+
 /** Traduit un lot en un appel. Lève si le compte de résultats ne correspond pas. */
 async function requestTranslationBatch(
-  apiKey: string,
+  provider: TranslationProvider,
   segments: TimedText[],
   sourceLanguage: string,
   targetLanguage: string,
@@ -115,15 +180,15 @@ Do not include numbering, quotes, or literal newlines in the text.
 SEGMENTS:
 ${segments.map((segment, index) => `[${index + 1}] (${(segment.end - segment.start).toFixed(2)}s): ${segment.text}`).join("\n")}`;
 
-  const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+  const response = await fetch(`${provider.baseUrl}/chat/completions`, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${apiKey}`,
+      Authorization: `Bearer ${provider.apiKey}`,
       "Content-Type": "application/json",
     },
     signal,
     body: JSON.stringify({
-      model: "google/gemini-2.5-flash",
+      model: provider.model,
       messages: [
         {
           role: "system",
@@ -140,15 +205,18 @@ ${segments.map((segment, index) => `[${index + 1}] (${(segment.end - segment.sta
             parameters: {
               type: "object",
               properties: {
+                // Schema volontairement limite au sous-ensemble OpenAPI accepte
+                // par Gemini : chaque noeud porte un `type` explicite, et pas de
+                // minItems/maxItems (rejetes en `Unknown name` cote Gemini). Le
+                // cardinal attendu est impose par le prompt puis re-verifie plus
+                // bas, donc rien n'est perdu.
                 results: {
                   type: "array",
-                  minItems: segments.length,
-                  maxItems: segments.length,
                   items: {
                     type: "object",
                     properties: {
                       translation: { type: "string" },
-                      direction: { enum: [...VOICE_DIRECTIONS] },
+                      direction: { type: "string", enum: [...VOICE_DIRECTIONS] },
                     },
                     required: ["translation", "direction"],
                   },
@@ -209,7 +277,7 @@ export type TranslationResult = { text: string; direction: VoiceDirection };
  * `failed` permet d'avertir l'utilisateur de ce qui n'a pas été traduit.
  */
 export async function requestTranslations(
-  apiKey: string,
+  provider: TranslationProvider,
   segments: TimedText[],
   sourceLanguage: string,
   targetLanguage: string,
@@ -227,14 +295,16 @@ export async function requestTranslations(
     signal?.throwIfAborted();
     try {
       results.push(
-        ...(await requestTranslationBatch(apiKey, batch, sourceLanguage, targetLanguage, signal)),
+        ...(await requestTranslationBatch(provider, batch, sourceLanguage, targetLanguage, signal)),
       );
     } catch (error) {
       if (signal?.aborted) throw error;
       console.error(`Traduction échouée sur un lot de ${batch.length} segments`, error);
       failed += batch.length;
       // Repli : on garde le texte source plutôt que de perdre le segment.
-      results.push(...batch.map((segment) => ({ text: segment.text, direction: "neutral" as const })));
+      results.push(
+        ...batch.map((segment) => ({ text: segment.text, direction: "neutral" as const })),
+      );
     }
   }
 
