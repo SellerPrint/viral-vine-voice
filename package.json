@@ -30,7 +30,8 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "check": "bun run typecheck && bun run lint && bun run test",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "check:kv": "bun run scripts/check-kv.ts"
   },
   "dependencies": {
     "@ffmpeg/core": "0.12.10",
