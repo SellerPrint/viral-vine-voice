@@ -13,6 +13,11 @@ export default tseslint.config(
     languageOptions: {
       ecmaVersion: 2020,
       globals: globals.browser,
+      // Requis par les regles typees ci-dessous.
+      parserOptions: {
+        projectService: { allowDefaultProject: ["vitest.config.ts"] },
+        tsconfigRootDir: import.meta.dirname,
+      },
     },
     plugins: {
       "react-hooks": reactHooks,
@@ -33,6 +38,11 @@ export default tseslint.config(
         },
       ],
       "react-refresh/only-export-components": ["warn", { allowConstantExport: true }],
+      // Une promesse oubliee est passee inapercue au typecheck : le plafond de
+      // depense TTS etait appele sans `await`, donc jamais applique. Cette
+      // regle transforme cette classe de bug en erreur de lint.
+      "@typescript-eslint/no-floating-promises": "error",
+      "@typescript-eslint/require-await": "warn",
       // Réactivé : c'est cette règle qui signale le code mort. Le préfixe `_`
       // permet d'ignorer explicitement un paramètre inutilisé.
       "@typescript-eslint/no-unused-vars": [

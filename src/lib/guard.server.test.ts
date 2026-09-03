@@ -25,41 +25,41 @@ describe("enforceRateLimit", () => {
   it("laisse passer les appels sous la limite", async () => {
     const { enforceRateLimit, RATE_LIMITS } = await loadGuard();
     for (let i = 0; i < RATE_LIMITS.transcribe.limit; i++) {
-      expect(() => enforceRateLimit("transcribe")).not.toThrow();
+      await expect(enforceRateLimit("transcribe")).resolves.not.toThrow();
     }
   });
 
   it("bloque au-delà de la limite", async () => {
     const { enforceRateLimit, RATE_LIMITS, RateLimitError } = await loadGuard();
-    for (let i = 0; i < RATE_LIMITS.transcribe.limit; i++) enforceRateLimit("transcribe");
-    expect(() => enforceRateLimit("transcribe")).toThrow(RateLimitError);
+    for (let i = 0; i < RATE_LIMITS.transcribe.limit; i++) await enforceRateLimit("transcribe");
+    await expect(enforceRateLimit("transcribe")).rejects.toThrow(RateLimitError);
   });
 
   it("réautorise après la fenêtre", async () => {
     const { enforceRateLimit, RATE_LIMITS } = await loadGuard();
-    for (let i = 0; i < RATE_LIMITS.transcribe.limit; i++) enforceRateLimit("transcribe");
+    for (let i = 0; i < RATE_LIMITS.transcribe.limit; i++) await enforceRateLimit("transcribe");
     vi.advanceTimersByTime(RATE_LIMITS.transcribe.windowMs + 1);
-    expect(() => enforceRateLimit("transcribe")).not.toThrow();
+    await expect(enforceRateLimit("transcribe")).resolves.not.toThrow();
   });
 
   it("compte séparément chaque IP", async () => {
     const { enforceRateLimit, RATE_LIMITS } = await loadGuard();
-    for (let i = 0; i < RATE_LIMITS.transcribe.limit; i++) enforceRateLimit("transcribe");
+    for (let i = 0; i < RATE_LIMITS.transcribe.limit; i++) await enforceRateLimit("transcribe");
     currentIp = "2.2.2.2";
-    expect(() => enforceRateLimit("transcribe")).not.toThrow();
+    await expect(enforceRateLimit("transcribe")).resolves.not.toThrow();
   });
 
   it("compte séparément chaque endpoint", async () => {
     const { enforceRateLimit, RATE_LIMITS } = await loadGuard();
-    for (let i = 0; i < RATE_LIMITS.transcribe.limit; i++) enforceRateLimit("transcribe");
-    expect(() => enforceRateLimit("translate")).not.toThrow();
+    for (let i = 0; i < RATE_LIMITS.transcribe.limit; i++) await enforceRateLimit("transcribe");
+    await expect(enforceRateLimit("translate")).resolves.not.toThrow();
   });
 
   it("annonce un délai de réessai exploitable", async () => {
     const { enforceRateLimit, RATE_LIMITS } = await loadGuard();
-    for (let i = 0; i < RATE_LIMITS.transcribe.limit; i++) enforceRateLimit("transcribe");
+    for (let i = 0; i < RATE_LIMITS.transcribe.limit; i++) await enforceRateLimit("transcribe");
     try {
-      enforceRateLimit("transcribe");
+      await enforceRateLimit("transcribe");
       expect.unreachable("aurait dû lever");
     } catch (error) {
       expect((error as { statusCode: number }).statusCode).toBe(429);
@@ -81,40 +81,40 @@ describe("consumeTtsBudget", () => {
   it("laisse passer sous le budget", async () => {
     process.env.TTS_DAILY_CHAR_BUDGET = "1000";
     const { consumeTtsBudget } = await loadGuard();
-    expect(() => consumeTtsBudget(500)).not.toThrow();
-    expect(() => consumeTtsBudget(400)).not.toThrow();
+    await expect(consumeTtsBudget(500)).resolves.not.toThrow();
+    await expect(consumeTtsBudget(400)).resolves.not.toThrow();
   });
 
   it("bloque le dépassement, y compris depuis une autre IP", async () => {
     process.env.TTS_DAILY_CHAR_BUDGET = "1000";
     const { consumeTtsBudget, BudgetExceededError } = await loadGuard();
-    consumeTtsBudget(900);
+    await consumeTtsBudget(900);
     currentIp = "9.9.9.9";
-    expect(() => consumeTtsBudget(200)).toThrow(BudgetExceededError);
+    await expect(consumeTtsBudget(200)).rejects.toThrow(BudgetExceededError);
   });
 
   it("ne décompte rien quand l'appel est refusé", async () => {
     process.env.TTS_DAILY_CHAR_BUDGET = "1000";
     const { consumeTtsBudget } = await loadGuard();
-    consumeTtsBudget(900);
-    expect(() => consumeTtsBudget(200)).toThrow();
+    await consumeTtsBudget(900);
+    await expect(consumeTtsBudget(200)).rejects.toThrow();
     // Le refus n'a pas consommé : il reste 100 caractères.
-    expect(() => consumeTtsBudget(100)).not.toThrow();
+    await expect(consumeTtsBudget(100)).resolves.not.toThrow();
   });
 
   it("repart à zéro après 24 h", async () => {
     process.env.TTS_DAILY_CHAR_BUDGET = "1000";
     const { consumeTtsBudget } = await loadGuard();
-    consumeTtsBudget(1000);
-    expect(() => consumeTtsBudget(1)).toThrow();
+    await consumeTtsBudget(1000);
+    await expect(consumeTtsBudget(1)).rejects.toThrow();
     vi.advanceTimersByTime(24 * 60 * 60 * 1000 + 1);
-    expect(() => consumeTtsBudget(1000)).not.toThrow();
+    await expect(consumeTtsBudget(1000)).resolves.not.toThrow();
   });
 
   it("retombe sur la valeur par défaut si la variable est invalide", async () => {
     process.env.TTS_DAILY_CHAR_BUDGET = "pas-un-nombre";
     const { consumeTtsBudget } = await loadGuard();
-    expect(() => consumeTtsBudget(1_000_000)).not.toThrow();
+    await expect(consumeTtsBudget(1_000_000)).resolves.not.toThrow();
   });
 });
 

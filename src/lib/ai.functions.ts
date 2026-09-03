@@ -67,7 +67,7 @@ export const synthesizeSpeech = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     await guard("speech", data.turnstileToken);
     // Plafond global : borne la facture même derrière un pool de proxys.
-    consumeTtsBudget(data.text.length);
+    await consumeTtsBudget(data.text.length);
     const signal = requestSignal();
 
     if (data.provider === "ai33") {

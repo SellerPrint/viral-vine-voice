@@ -238,7 +238,7 @@ export async function renderWithFallback(
       outputName,
     );
 
-    let code = 1;
+    let code: number;
     try {
       code = await ff.exec(args);
     } catch {
