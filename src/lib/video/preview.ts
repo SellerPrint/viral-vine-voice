@@ -90,7 +90,7 @@ export async function renderPreviewFrame(
         chain.push(`drawbox=x=0:y=ih*0.82:w=iw:h=ih*0.14:color=${plate}:t=fill`);
       }
       chain.push(
-        `drawtext=fontfile=font.ttf:textfile=${textFile}:reload=0:${buildStyleBits(preset)}:x=(w-text_w)/2:y=h*${anchor.toFixed(3)}-text_h/2`,
+        `drawtext=fontfile=font.ttf:textfile=${textFile}:reload=0:expansion=none:${buildStyleBits(preset)}:x=(w-text_w)/2:y=h*${anchor.toFixed(3)}-text_h/2`,
       );
     }
 

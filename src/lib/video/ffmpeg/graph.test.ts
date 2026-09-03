@@ -239,3 +239,19 @@ describe("durée de la piste de voix off", () => {
     expect(graph).toContain("[aout]");
   });
 });
+
+describe("échappement du texte des sous-titres", () => {
+  it("désactive l'expansion, sinon un « % » efface le sous-titre", () => {
+    // `drawtext` traite `%` comme le début d'une séquence strftime. Sans
+    // `expansion=none`, « Déjà 100 % » ne s'affichait pas du tout — panne
+    // silencieuse, fréquente sur des vidéos promotionnelles.
+    const graph = buildGraph(baseInputs({}), allOn);
+    expect(graph).toContain("expansion=none");
+  });
+
+  it("place expansion=none avant le style, donc avant tout texte", () => {
+    const graph = buildGraph(baseInputs({}), allOn);
+    const drawtext = graph.slice(graph.indexOf("drawtext="));
+    expect(drawtext.indexOf("expansion=none")).toBeLessThan(drawtext.indexOf("fontsize"));
+  });
+});

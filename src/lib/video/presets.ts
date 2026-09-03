@@ -197,6 +197,7 @@ export type TargetLanguage = { code: string; label: string; name: string };
 
 export const TARGET_LANGUAGES: TargetLanguage[] = [
   { code: "en", label: "🇬🇧 Anglais", name: "English" },
+  { code: "fr", label: "🇫🇷 Français", name: "French" },
   { code: "es", label: "🇪🇸 Espagnol", name: "Spanish" },
   { code: "pt", label: "🇧🇷 Portugais", name: "Portuguese (Brazil)" },
   { code: "de", label: "🇩🇪 Allemand", name: "German" },

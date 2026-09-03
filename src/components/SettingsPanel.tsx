@@ -8,7 +8,7 @@ import {
   type SubtitlePreset,
   type TargetLanguage,
 } from "@/lib/video/presets";
-import { SOURCE_LANGUAGES, type SourceLanguage } from "@/lib/languages";
+import { isSameLanguage, SOURCE_LANGUAGES, type SourceLanguage } from "@/lib/languages";
 import { detectMaskZones } from "@/lib/video/detect";
 import { VIDEO_FILTERS, UPSCALE_MODES } from "@/lib/video/filters";
 import { renderPreviewFrame } from "@/lib/video/preview";
@@ -349,6 +349,14 @@ export function SettingsPanel({
         <p className="mt-1 text-xs text-muted-foreground">
           Langue des sous-titres traduits (et de la voix off).
         </p>
+        {isSameLanguage(sourceLanguage.name, targetLanguage.name) && (
+          // Traduire une langue vers elle-meme consomme transcription,
+          // traduction et synthese vocale pour reecrire le meme texte.
+          <p className="mt-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+            Langue source et langue finale identiques : la vidéo sera retranscrite et redoublée sans
+            être traduite. Choisis une autre langue finale pour un vrai doublage.
+          </p>
+        )}
         <div className="mt-3 flex flex-wrap gap-2">
           {TARGET_LANGUAGES.map((l) => (
             <button

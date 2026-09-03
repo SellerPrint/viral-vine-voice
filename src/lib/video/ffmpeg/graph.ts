@@ -112,6 +112,12 @@ export function buildStyleBits(preset: SubtitlePreset): string {
  *
  * Le texte est lu depuis un fichier (`textfile=`) et jamais interpolé dans
  * l'expression : apostrophes, deux-points et virgules casseraient le graphe.
+ *
+ * `expansion=none` est indispensable. Par défaut `drawtext` développe le texte
+ * comme un modèle : `%` y démarre une séquence `strftime`. Un sous-titre
+ * contenant « 100 % » — courant dans les vidéos virales — n'était pas
+ * seulement déformé, il **disparaissait entièrement**, sans la moindre erreur.
+ * Reproduit : le PNG rendu tombait de 3725 à 264 octets, soit une image vide.
  */
 function buildTextFilters(inputs: GraphInputs, withCuts: boolean): string {
   const { cues, subtitleFiles, preset, coverMask, subYAnchor, remap } = inputs;
@@ -138,7 +144,7 @@ function buildTextFilters(inputs: GraphInputs, withCuts: boolean): string {
       }
 
       filters.push(
-        `drawtext=fontfile=font.ttf:textfile=${subtitleFiles[index]}:reload=0:${styleBits}:x=(w-text_w)/2:y=h*${subYAnchor.toFixed(3)}-text_h/2:${enable}`,
+        `drawtext=fontfile=font.ttf:textfile=${subtitleFiles[index]}:reload=0:expansion=none:${styleBits}:x=(w-text_w)/2:y=h*${subYAnchor.toFixed(3)}-text_h/2:${enable}`,
       );
       return filters;
     })

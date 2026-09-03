@@ -27,3 +27,28 @@ export const SOURCE_LANGUAGES: SourceLanguage[] = [
 export const DEFAULT_SOURCE_LANGUAGE = SOURCE_LANGUAGES[0];
 
 export const SOURCE_LANGUAGE_CODES = SOURCE_LANGUAGES.map((l) => l.code);
+
+/**
+ * Indique si la langue source et la langue cible designent la meme langue.
+ *
+ * Les deux listes n'utilisent pas la meme norme : les langues sources sont en
+ * ISO 639-3 (« fra », « eng ») parce que c'est ce qu'attend ElevenLabs Scribe,
+ * les langues cibles en ISO 639-1 (« fr », « en »). Une comparaison directe
+ * des codes ne detecterait donc jamais l'egalite.
+ *
+ * On compare le nom anglais, qui est commun aux deux listes.
+ *
+ * Sans ce controle, choisir Francais -> Francais lance une transcription, une
+ * traduction et une synthese vocale completes pour reecrire le meme texte :
+ * des credits IA depenses pour rien.
+ */
+export function isSameLanguage(
+  sourceName: string | undefined,
+  targetName: string | undefined,
+): boolean {
+  if (!sourceName || !targetName) return false;
+  // « Portuguese » cote source, « Portuguese (Brazil) » cote cible : on
+  // compare la partie avant la parenthese.
+  const normalise = (value: string) => value.split("(")[0].trim().toLowerCase();
+  return normalise(sourceName) === normalise(targetName);
+}
