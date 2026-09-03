@@ -79,6 +79,10 @@ test("les en-têtes de sécurité sont servis", async ({ page }) => {
 });
 
 test("un fichier trop lourd est refusé avec un message explicite", async ({ page }) => {
+  // Allouer 61 Mo dans la page pendant que Vite compile encore ses modules a
+  // deja fait depasser le delai par defaut sur une machine chargee.
+  test.slow();
+
   // `networkidle` : sans hydratation terminee, le gestionnaire React n'est pas
   // encore attache au champ et l'evenement `change` part dans le vide.
   await page.goto("/", { waitUntil: "networkidle" });
@@ -112,4 +116,19 @@ test("une vidéo valide est acceptée et ouvre les réglages", async ({ page }) 
   // Le panneau de réglages n'apparaît qu'une fois la vidéo importée : c'est
   // ce montage tardif qui avait empêché le widget Turnstile de se rendre.
   await expect(page.getByText(/Sous-titres FR/i)).toBeVisible({ timeout: 30_000 });
+});
+
+test("la page est isolée cross-origin (SharedArrayBuffer disponible)", async ({ page }) => {
+  await page.goto("/", { waitUntil: "networkidle" });
+
+  // Sans isolation, le navigateur retire `SharedArrayBuffer` et le cœur
+  // FFmpeg multi-thread ne peut pas se charger : le rendu retomberait
+  // silencieusement sur le cœur mono-thread, bien plus lent. Ce test échoue
+  // donc si les en-têtes COOP/COEP disparaissent d'un côté ou de l'autre.
+  const isolated = await page.evaluate(() => ({
+    crossOriginIsolated: globalThis.crossOriginIsolated,
+    sharedArrayBuffer: typeof SharedArrayBuffer !== "undefined",
+  }));
+
+  expect(isolated).toEqual({ crossOriginIsolated: true, sharedArrayBuffer: true });
 });

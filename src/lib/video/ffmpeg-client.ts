@@ -6,9 +6,40 @@ import type { FFmpeg as FFmpegType } from "@ffmpeg/ffmpeg";
 // externe dans le chemin critique.
 import coreUrl from "@ffmpeg/core?url";
 import wasmUrl from "@ffmpeg/core/wasm?url";
+import coreMtUrl from "@ffmpeg/core-mt?url";
+import wasmMtUrl from "@ffmpeg/core-mt/wasm?url";
+import workerMtUrl from "@ffmpeg/core-mt/worker?url";
 
 let instance: FFmpegType | null = null;
 let loading: Promise<FFmpegType> | null = null;
+let multiThread = false;
+
+/**
+ * Le cœur multi-thread n'est chargeable que si le navigateur nous place en
+ * contexte isolé (`crossOriginIsolated`), ce qui suppose les en-têtes
+ * `Cross-Origin-Opener-Policy: same-origin` et
+ * `Cross-Origin-Embedder-Policy: credentialless` servis par l'hébergeur.
+ *
+ * On ne se fie pas aux en-têtes : on interroge le navigateur. Deux raisons.
+ * D'abord Safari n'implémente pas `credentialless`, l'isolation n'y est donc
+ * pas accordée même en présence des en-têtes. Ensuite un contexte non isolé
+ * n'expose pas `SharedArrayBuffer`, dont dépend le cœur multi-thread : le
+ * charger quand même échouerait au lancement du rendu.
+ *
+ * Le repli mono-thread est plus lent mais fonctionnellement identique.
+ */
+export function canUseMultiThread(): boolean {
+  return (
+    typeof globalThis.crossOriginIsolated === "boolean" &&
+    globalThis.crossOriginIsolated &&
+    typeof SharedArrayBuffer !== "undefined"
+  );
+}
+
+/** Indique si l'instance chargée utilise le cœur multi-thread. */
+export function isMultiThread(): boolean {
+  return instance !== null && multiThread;
+}
 
 export async function getFfmpeg(onLog?: (m: string) => void, onProgress?: (p: number) => void) {
   if (typeof window === "undefined") {
@@ -41,7 +72,15 @@ export async function getFfmpeg(onLog?: (m: string) => void, onProgress?: (p: nu
     // Les fichiers sont déjà servis par notre propre origine : le détour par
     // un blob n'apportait rien. On économise au passage la recopie en mémoire
     // des 32 Mo du .wasm.
-    await ff.load({ coreURL: coreUrl, wasmURL: wasmUrl });
+    // Cœur multi-thread quand le navigateur nous accorde l'isolation
+    // cross-origin, mono-thread sinon. Voir `canUseMultiThread()`.
+    if (canUseMultiThread()) {
+      multiThread = true;
+      await ff.load({ coreURL: coreMtUrl, wasmURL: wasmMtUrl, workerURL: workerMtUrl });
+    } else {
+      multiThread = false;
+      await ff.load({ coreURL: coreUrl, wasmURL: wasmUrl });
+    }
 
     instance = ff;
     return ff;
