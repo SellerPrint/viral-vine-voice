@@ -8,6 +8,13 @@ import {
   type SubtitlePreset,
   type TargetLanguage,
 } from "@/lib/video/presets";
+import {
+  applyConfig,
+  configFileName,
+  exportConfig,
+  MAX_CONFIG_BYTES,
+  parseConfig,
+} from "@/lib/config-io";
 import { isSameLanguage, SOURCE_LANGUAGES, type SourceLanguage } from "@/lib/languages";
 import { detectMaskZones } from "@/lib/video/detect";
 import { VIDEO_FILTERS, UPSCALE_MODES } from "@/lib/video/filters";
@@ -108,6 +115,76 @@ export function SettingsPanel({
   const setOption = <K extends keyof RenderOptions>(key: K, value: RenderOptions[K]) =>
     update({ options: { ...options, [key]: value } });
 
+  /* ------------------------- import / export config ------------------------ */
+
+  const configInputRef = useRef<HTMLInputElement>(null);
+  const [configMessage, setConfigMessage] = useState<{
+    kind: "ok" | "error";
+    text: string;
+  } | null>(null);
+
+  const handleExport = () => {
+    const json = exportConfig({
+      presetId: preset.id,
+      sourceLanguage: sourceLanguage.code,
+      targetLanguage: targetLanguage.code,
+      options,
+      masks,
+    });
+
+    const url = URL.createObjectURL(new Blob([json], { type: "application/json" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = configFileName();
+    link.click();
+    URL.revokeObjectURL(url);
+
+    setConfigMessage({ kind: "ok", text: "Configuration exportée." });
+  };
+
+  const handleImport = async (fileList: FileList | null) => {
+    const chosen = fileList?.[0];
+    if (!chosen) return;
+
+    // On refuse avant de lire : inutile de charger 500 Mo en memoire pour
+    // decouvrir ensuite que ce n'est pas une configuration.
+    if (chosen.size > MAX_CONFIG_BYTES) {
+      setConfigMessage({ kind: "error", text: "Fichier trop volumineux." });
+      return;
+    }
+
+    const result = parseConfig(await chosen.text());
+    if (!result.ok) {
+      setConfigMessage({ kind: "error", text: result.error });
+      return;
+    }
+
+    const merged = applyConfig(result.config, {
+      presetId: preset.id,
+      sourceLanguage: sourceLanguage.code,
+      targetLanguage: targetLanguage.code,
+      options,
+      masks,
+    });
+
+    // Les identifiants valides ont ete verifies contre les listes blanches :
+    // un `find` qui echoue signifie seulement que le champ etait absent.
+    update({
+      preset: SUBTITLE_PRESETS.find((p) => p.id === merged.presetId) ?? preset,
+      sourceLanguage:
+        SOURCE_LANGUAGES.find((l) => l.code === merged.sourceLanguage) ?? sourceLanguage,
+      targetLanguage:
+        TARGET_LANGUAGES.find((l) => l.code === merged.targetLanguage) ?? targetLanguage,
+      options: merged.options,
+      masks: masks.map((m) => {
+        const imported = merged.masks.find((i) => i.id === m.id);
+        return imported ? { ...m, ...imported } : m;
+      }),
+    });
+
+    setConfigMessage({ kind: "ok", text: "Configuration importée." });
+  };
+
   const effective = { ...preset, ...overrides };
 
   const autoDetect = async () => {
@@ -130,13 +207,56 @@ export function SettingsPanel({
 
   return (
     <div className="mt-6 space-y-6 rounded-2xl border border-border bg-background/40 p-5">
+      {/* --------------------------- import / export --------------------------- */}
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={handleExport}
+          className="rounded-full border border-border px-3 py-1.5 text-xs text-muted-foreground transition hover:text-foreground"
+        >
+          Exporter la configuration
+        </button>
+        <button
+          type="button"
+          onClick={() => configInputRef.current?.click()}
+          className="rounded-full border border-border px-3 py-1.5 text-xs text-muted-foreground transition hover:text-foreground"
+        >
+          Importer une configuration
+        </button>
+        <input
+          ref={configInputRef}
+          type="file"
+          accept="application/json,.json"
+          className="hidden"
+          onChange={(e) => {
+            void handleImport(e.target.files);
+            // Reinitialise pour que reimporter le meme fichier declenche
+            // bien un nouvel evenement `change`.
+            e.target.value = "";
+          }}
+        />
+        {configMessage && (
+          <span
+            className={`text-xs ${
+              configMessage.kind === "ok" ? "text-emerald-400" : "text-amber-300"
+            }`}
+          >
+            {configMessage.text}
+          </span>
+        )}
+      </div>
+      <p className="-mt-4 text-xs text-muted-foreground">
+        Le fichier ne contient que des réglages : ni clé d'API, ni identifiant de voix clonée, ni
+        vidéo.
+      </p>
+
       <div>
         <h3 className="font-display text-lg font-bold">Montage & audio</h3>
         <div className="mt-3 space-y-2">
           {(
             [
               ["wordByWord", "Sous-titres mot par mot"],
-              ["removeOriginalAudio", "Supprimer l'audio d'origine"],
+              ["removeOriginalAudio", "Supprimer l'ambiance d'origine"],
               ["cutSilences", "Couper les scènes silencieuses"],
               ["mirror", "Effet miroir (flip horizontal)"],
             ] as const
@@ -216,6 +336,33 @@ export function SettingsPanel({
         <p className="mt-1 text-xs text-muted-foreground">
           0 % : aucun bandeau, seuls le contour et l'ombre assurent la lisibilité.
         </p>
+
+        {/* ------------------------------ ambiance ------------------------------- */}
+        {!options.removeOriginalAudio && (
+          <>
+            <div className="mt-4 flex items-center justify-between">
+              <p className="text-xs font-medium text-muted-foreground">
+                Volume de l'ambiance d'origine
+              </p>
+              <span className="text-xs tabular-nums text-muted-foreground">
+                {Math.round(options.ambienceLevel * 100)} %
+              </span>
+            </div>
+            <input
+              type="range"
+              min={0}
+              max={1}
+              step={0.05}
+              value={options.ambienceLevel}
+              onChange={(e) => setOption("ambienceLevel", Number(e.target.value))}
+              className="mt-2 w-full accent-primary"
+            />
+            <p className="mt-1 text-xs text-muted-foreground">
+              Musique et bruits de la vidéo conservés sous la voix off. Le fond baisse
+              automatiquement quand la voix parle, puis remonte dans les silences.
+            </p>
+          </>
+        )}
 
         {/* ----------------------------- transitions ----------------------------- */}
         <p className="mt-5 text-xs font-medium text-muted-foreground">

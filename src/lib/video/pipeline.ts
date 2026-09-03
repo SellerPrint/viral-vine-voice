@@ -246,6 +246,7 @@ export async function runPipeline(
       hasAudio,
       hasVoice: Boolean(voiceWav),
       mirror: opts?.mirror === true,
+      ambienceLevel: opts?.ambienceLevel,
       remap: (t) => remapTimeWithTransitions(t, keeps, cutDurations),
       filterId: opts?.filterId,
       upscale: opts?.upscale ?? "none",

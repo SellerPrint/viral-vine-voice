@@ -230,6 +230,8 @@ export type PipelineOptions = {
   wordByWord?: boolean;
   /** Supprimer totalement l'audio d'origine (défaut: true) */
   removeOriginalAudio?: boolean;
+  /** Volume de l'ambiance d'origine sous la voix off, de 0 a 1. */
+  ambienceLevel?: number;
   /** Moteur de synthèse vocale */
   ttsProvider?: TtsProvider;
   /** Identifiant de la voix clonée (ai33.pro) */

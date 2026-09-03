@@ -163,6 +163,7 @@ function Home() {
           turnstileToken: turnstile.token,
           wordByWord: renderOptions.wordByWord,
           removeOriginalAudio: renderOptions.removeOriginalAudio,
+          ambienceLevel: renderOptions.ambienceLevel,
           cutSilences: renderOptions.cutSilences,
           mirror: renderOptions.mirror,
           ttsProvider: renderOptions.ttsProvider,

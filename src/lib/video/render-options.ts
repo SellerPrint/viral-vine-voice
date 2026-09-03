@@ -20,11 +20,19 @@ export type RenderOptions = {
   transitionDuration: number;
   /** Opacite du fond des sous-titres, 0 = transparent. */
   subtitleOpacity: number;
+  /**
+   * Volume de l'ambiance d'origine sous la voix off, de 0 a 1.
+   *
+   * Ignore si `removeOriginalAudio` est actif. C'est ce qui donne la
+   * sensation d'immersion : sans un fond audible, la voix flotte sur du
+   * silence et sonne comme un commentaire plaque.
+   */
+  ambienceLevel: number;
 };
 
 export const DEFAULT_RENDER_OPTIONS: RenderOptions = {
   wordByWord: true,
-  removeOriginalAudio: true,
+  removeOriginalAudio: false,
   cutSilences: true,
   mirror: false,
   ttsProvider: "elevenlabs",
@@ -37,4 +45,6 @@ export const DEFAULT_RENDER_OPTIONS: RenderOptions = {
   transitionDuration: 0.3,
   // Defaut discret, conformement au preset « discret ».
   subtitleOpacity: 0,
+  // Ambiance conservee par defaut, a un niveau qui ne masque pas la voix.
+  ambienceLevel: 0.25,
 };

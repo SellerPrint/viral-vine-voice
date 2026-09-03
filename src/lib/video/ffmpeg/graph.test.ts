@@ -92,11 +92,43 @@ describe("buildGraph", () => {
     expect(graph.indexOf("hflip")).toBeLessThan(graph.indexOf("drawtext"));
   });
 
-  it("mixe la voix off avec l'audio d'origine atténué", () => {
+  it("mixe la voix off avec l'ambiance d'origine", () => {
     const graph = buildGraph(baseInputs({ hasAudio: true, hasVoice: true }), allOn);
     expect(graph).toContain("amix=inputs=2");
-    expect(graph).toContain("volume=0.15");
+    // Defaut a 0.25 : l'ancien 0.15 rendait le fond inaudible sur telephone.
+    expect(graph).toContain("volume=0.25");
     expect(graph).toContain("[aout]");
+  });
+
+  it("applique le ducking : l'ambiance baisse quand la voix parle", () => {
+    // Sans `sidechaincompress`, il fallait choisir entre un fond audible et
+    // une voix intelligible. La chaine laterale resout le conflit.
+    const graph = buildGraph(baseInputs({ hasAudio: true, hasVoice: true }), allOn);
+    expect(graph).toContain("sidechaincompress");
+    // La voix est dupliquee : une copie pour le mixage, une comme declencheur.
+    expect(graph).toContain("asplit=2[voicemix][voicekey]");
+  });
+
+  it("respecte le niveau d'ambiance demande", () => {
+    const graph = buildGraph(
+      baseInputs({ hasAudio: true, hasVoice: true, ambienceLevel: 0.6 }),
+      allOn,
+    );
+    expect(graph).toContain("volume=0.60");
+  });
+
+  it("borne un niveau d'ambiance aberrant plutot que de saturer", () => {
+    const trop = buildGraph(
+      baseInputs({ hasAudio: true, hasVoice: true, ambienceLevel: 9 }),
+      allOn,
+    );
+    expect(trop).toContain("volume=1.00");
+
+    const negatif = buildGraph(
+      baseInputs({ hasAudio: true, hasVoice: true, ambienceLevel: -3 }),
+      allOn,
+    );
+    expect(negatif).toContain("volume=0.00");
   });
 
   it("utilise la voix seule quand l'audio d'origine est retiré", () => {

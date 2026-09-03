@@ -21,6 +21,13 @@ export type GraphInputs = {
   hasAudio: boolean;
   hasVoice: boolean;
   mirror: boolean;
+  /**
+   * Volume de l'ambiance d'origine sous la voix off, de 0 a 1.
+   *
+   * Etait fige a 0.15, une valeur si basse que le fond etait inaudible sur
+   * un telephone : la voix off semblait posee sur du silence.
+   */
+  ambienceLevel?: number;
   remap: (t: number) => number;
   /** Filtre colorimetrique facultatif. */
   filterId?: string;
@@ -154,6 +161,8 @@ function buildTextFilters(inputs: GraphInputs, withCuts: boolean): string {
 /** Assemble le graphe de filtres complet pour une combinaison d'options. */
 export function buildGraph(inputs: GraphInputs, toggles: GraphToggles): string {
   const { activeMasks, keeps, hasAudio, hasVoice, mirror } = inputs;
+  // Borne defensive : une valeur hors [0,1] produirait une saturation.
+  const ambience = Math.min(1, Math.max(0, inputs.ambienceLevel ?? 0.25));
   const cuts = toggles.cuts && keeps.length > 1;
 
   // Transitions : uniquement s'il y a bien plusieurs segments a raccorder.
@@ -270,7 +279,16 @@ export function buildGraph(inputs: GraphInputs, toggles: GraphToggles): string {
         // off etait plus longue (traduction plus verbeuse que la source), sa fin
         // etait purement supprimee. `longest` conserve les deux pistes ; la video
         // reste la reference de duree grace a `-shortest` cote encodeur.
-        `;[${audioIn}]volume=0.15,aresample=44100[a0];[${voiceIn}]volume=1.8,aresample=44100[a1];[a0][a1]amix=inputs=2:duration=longest:dropout_transition=0,alimiter=limit=0.9[aout]`
+        // `sidechaincompress` fait automatiquement baisser l'ambiance des que
+        // la voix off parle, puis la laisse remonter dans les silences. C'est
+        // la technique du « ducking » radio : elle permet de garder un fond
+        // vraiment audible sans jamais couvrir la voix, la ou un volume fixe
+        // obligeait a choisir entre les deux.
+        `;[${audioIn}]volume=${ambience.toFixed(2)},aresample=44100[amb];` +
+        `[${voiceIn}]volume=1.6,aresample=44100[voice];` +
+        `[voice]asplit=2[voicemix][voicekey];` +
+        `[amb][voicekey]sidechaincompress=threshold=0.05:ratio=8:attack=20:release=400[ambduck];` +
+        `[ambduck][voicemix]amix=inputs=2:duration=longest:dropout_transition=0,alimiter=limit=0.9[aout]`
       : `;[${voiceIn}]volume=1.4,aresample=44100[aout]`;
   } else if (hasAudio) {
     graph += `;[${audioIn}]volume=1,aresample=44100[aout]`;

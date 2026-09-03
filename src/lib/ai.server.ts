@@ -392,6 +392,14 @@ export async function requestTranslations(
   return { results, failed };
 }
 
+/**
+ * Modele de synthese vocale.
+ *
+ * Expose pour que les tests verrouillent ce choix : revenir a un modele
+ * « turbo » degraderait le naturel sans benefice perceptible ici.
+ */
+export const TTS_MODEL_ID = "eleven_multilingual_v2";
+
 export async function requestSpeech(
   apiKey: string,
   input: {
@@ -404,12 +412,17 @@ export async function requestSpeech(
   },
   signal?: AbortSignal,
 ) {
+  // Une `stability` basse rend la voix instable : c'est elle qui produisait
+  // les changements de timbre en cours de phrase, percus comme des « accents »
+  // qui vont et viennent. On remonte le plancher a 0.45 et on reduit `style`,
+  // dont les valeurs elevees exagerent l'intonation jusqu'a la caricature et
+  // font apparaitre des respirations parasites.
   const delivery = {
-    neutral: { stability: 0.5, style: 0.25 },
-    energetic: { stability: 0.35, style: 0.6 },
-    excited: { stability: 0.25, style: 0.8 },
-    serious: { stability: 0.75, style: 0.15 },
-    soft: { stability: 0.6, style: 0.1 },
+    neutral: { stability: 0.55, style: 0.15 },
+    energetic: { stability: 0.5, style: 0.35 },
+    excited: { stability: 0.45, style: 0.45 },
+    serious: { stability: 0.75, style: 0.1 },
+    soft: { stability: 0.65, style: 0.05 },
   }[input.direction];
 
   const response = await fetch(
@@ -423,7 +436,16 @@ export async function requestSpeech(
       signal,
       body: JSON.stringify({
         text: input.text,
-        model_id: "eleven_turbo_v2_5",
+        // Normalisation systematique : « 100 % » ou « 2026 » etaient parfois
+        // epeles caractere par caractere en mode auto, ce qui s'entend
+        // immediatement comme un defaut de machine.
+        apply_text_normalization: "on",
+        // `eleven_turbo_v2_5` est officiellement deprecie et optimise pour la
+        // latence, au detriment du naturel. `eleven_multilingual_v2` est le
+        // modele le plus « lifelike » du catalogue et le plus stable sur des
+        // generations longues : c'est ce qui compte pour un doublage, ou
+        // quelques centaines de millisecondes de latence sont sans importance.
+        model_id: TTS_MODEL_ID,
         previous_text: input.previousText,
         next_text: input.nextText,
         voice_settings: {
