@@ -132,3 +132,28 @@ test("la page est isolée cross-origin (SharedArrayBuffer disponible)", async ({
 
   expect(isolated).toEqual({ crossOriginIsolated: true, sharedArrayBuffer: true });
 });
+
+test("/api/health rapporte l'état du stockage partagé", async ({ request }) => {
+  const response = await request.get("/api/health");
+  const body = (await response.json()) as {
+    status: string;
+    kv: { backend: string; reachable: boolean | null };
+  };
+
+  // En local sans KV configuré, l'état attendu est « degraded / memory » :
+  // c'est justement ce que la route doit rendre visible plutôt que de le
+  // taire. Contre un déploiement réel (E2E_BASE_URL), on exige « ok ».
+  if (process.env.E2E_BASE_URL) {
+    expect(body.kv.backend).toBe("redis");
+    expect(body.kv.reachable).toBe(true);
+    expect(response.status()).toBe(200);
+  } else {
+    expect(["redis", "memory"]).toContain(body.kv.backend);
+    expect([200, 503]).toContain(response.status());
+  }
+
+  // Le diagnostic ne doit jamais divulguer les identifiants.
+  const raw = JSON.stringify(body);
+  expect(raw).not.toContain("upstash.io");
+  expect(raw).not.toMatch(/Bearer|KV_REST_API_TOKEN=/);
+});
