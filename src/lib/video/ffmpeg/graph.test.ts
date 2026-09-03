@@ -84,6 +84,14 @@ describe("buildGraph", () => {
     expect(graph.startsWith("[0:v]hflip[vflip];")).toBe(true);
   });
 
+  it("incruste les sous-titres APRES le miroir, pour qu'ils restent lisibles", () => {
+    // `hflip` retourne l'image entiere. Si `drawtext` s'appliquait avant, nos
+    // propres sous-titres sortiraient ecrits a l'envers. Seul le texte deja
+    // incruste dans la video source est retourne, ce qui est inevitable.
+    const graph = buildGraph(baseInputs({ mirror: true }), allOn);
+    expect(graph.indexOf("hflip")).toBeLessThan(graph.indexOf("drawtext"));
+  });
+
   it("mixe la voix off avec l'audio d'origine atténué", () => {
     const graph = buildGraph(baseInputs({ hasAudio: true, hasVoice: true }), allOn);
     expect(graph).toContain("amix=inputs=2");

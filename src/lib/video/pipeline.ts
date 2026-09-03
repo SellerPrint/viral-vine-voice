@@ -197,7 +197,9 @@ export async function runPipeline(
     cleanupNames.add("font.ttf");
     // La police est mise en cache pour la session : la transferer la
     // detacherait des le deuxieme rendu.
-    await writeFileSafe(ff, "font.ttf", await loadFont(signal));
+    // La police depend de la langue cible : Roboto n'a aucun glyphe arabe,
+    // devanagari ni CJK, et les sous-titres sortaient en carres.
+    await writeFileSafe(ff, "font.ttf", await loadFont(signal, targetLanguage.code));
 
     /* ------------------------------- masques -------------------------------- */
     const sizeMatch = probe.match(/Video:.*?[\s,](\d{2,5})x(\d{2,5})/);

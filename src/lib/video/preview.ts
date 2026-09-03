@@ -27,6 +27,8 @@ export type PreviewOptions = {
   subYAnchor?: number;
   /** Instant de la video a echantillonner, en secondes. */
   atSecond?: number;
+  /** Code de langue cible : choisit la police (arabe, hindi, CJK...). */
+  languageCode?: string;
   signal?: AbortSignal;
 };
 
@@ -48,6 +50,7 @@ export async function renderPreviewFrame(
     preset,
     subYAnchor,
     atSecond = 1,
+    languageCode,
     signal,
   } = options;
 
@@ -73,7 +76,7 @@ export async function renderPreviewFrame(
     if (sampleText && preset) {
       // `drawtext` echoue sans fichier de police dans le systeme de fichiers
       // virtuel : le rendu l'ecrit de son cote, l'apercu doit faire de meme.
-      await writeFileSafe(ff, "font.ttf", await loadFont(signal));
+      await writeFileSafe(ff, "font.ttf", await loadFont(signal, languageCode));
       const wrapped = wrapLines(
         preset.uppercase ? sampleText.toUpperCase() : sampleText,
         preset.maxCharsPerLine,

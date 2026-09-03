@@ -74,6 +74,9 @@ export function SettingsPanel({
         sampleText: "Aperçu des sous-titres",
         preset: { ...preset, ...overrides, boxOpacity: options.subtitleOpacity },
         atSecond: 1,
+        // Sans cela l'aperçu utiliserait Roboto quelle que soit la langue et
+        // afficherait des carrés là où le rendu final sera correct.
+        languageCode: targetLanguage.code,
       });
       setPreviewUrl((old) => {
         if (old) URL.revokeObjectURL(old);
