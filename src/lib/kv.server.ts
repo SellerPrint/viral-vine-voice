@@ -43,9 +43,26 @@ function pruneMemory(now: number): void {
 }
 
 function redisConfig(): { url: string; token: string } | null {
-  const url = process.env.KV_REST_API_URL;
-  const token = process.env.KV_REST_API_TOKEN;
+  // Deux jeux de noms coexistent selon la façon dont la base a été créée :
+  // l'intégration Upstash du Marketplace Vercel injecte `KV_REST_API_*`,
+  // tandis qu'une base créée directement sur console.upstash.com expose
+  // `UPSTASH_REDIS_REST_*`. On accepte les deux pour éviter un repli mémoire
+  // silencieux dû au seul nom de la variable.
+  const url = process.env.KV_REST_API_URL ?? process.env.UPSTASH_REDIS_REST_URL;
+  const token = process.env.KV_REST_API_TOKEN ?? process.env.UPSTASH_REDIS_REST_TOKEN;
   if (!url || !token) return null;
+
+  // `REDIS_URL` (protocole TCP `redis://`) n'est pas utilisable ici : ce
+  // module parle l'API REST en HTTP. L'intégration « Redis » du Marketplace
+  // Vercel ne fournit que cette forme-là ; il faut l'intégration Upstash.
+  if (!/^https?:\/\//.test(url)) {
+    console.error(
+      "[kv] URL non REST ignorée (attendu https://…, reçu un schéma TCP). " +
+        "Utilisez l'intégration Upstash, pas une chaîne redis:// .",
+    );
+    return null;
+  }
+
   return { url: url.replace(/\/$/, ""), token };
 }
 

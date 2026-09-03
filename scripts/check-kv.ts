@@ -12,8 +12,9 @@
 
 export {}; // fait de ce fichier un module : requis pour le `await` de haut niveau
 
-const url = process.env.KV_REST_API_URL;
-const token = process.env.KV_REST_API_TOKEN;
+// Mêmes noms acceptés que `src/lib/kv.server.ts`.
+const url = process.env.KV_REST_API_URL ?? process.env.UPSTASH_REDIS_REST_URL;
+const token = process.env.KV_REST_API_TOKEN ?? process.env.UPSTASH_REDIS_REST_TOKEN;
 
 function fail(message: string, hint?: string): never {
   console.error(`\n❌ ${message}`);
@@ -38,6 +39,16 @@ if (!token)
     "KV_REST_API_URL est défini mais KV_REST_API_TOKEN manque.",
     "Les deux sont requis, sinon repli mémoire.",
   );
+
+if (/^rediss?:\/\//.test(url)) {
+  fail(
+    "Cette valeur est une chaîne de connexion TCP (redis://…), pas une URL REST.",
+    "C'est ce que fournit l'intégration « Redis » du Marketplace Vercel, qui\n" +
+      "   n'expose pas d'API REST HTTP. Le code a besoin de l'intégration\n" +
+      "   « Upstash » : supprimez la base actuelle, créez-en une chez Upstash,\n" +
+      "   et vous obtiendrez une URL en https://….upstash.io",
+  );
+}
 
 function originOf(value: string): string {
   try {

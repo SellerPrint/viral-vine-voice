@@ -10,11 +10,23 @@ import {
 } from "./kv.server";
 
 describe("kvBackend", () => {
-  const saved = { url: process.env.KV_REST_API_URL, token: process.env.KV_REST_API_TOKEN };
+  const saved = {
+    url: process.env.KV_REST_API_URL,
+    token: process.env.KV_REST_API_TOKEN,
+    upstashUrl: process.env.UPSTASH_REDIS_REST_URL,
+    upstashToken: process.env.UPSTASH_REDIS_REST_TOKEN,
+  };
+
+  beforeEach(() => {
+    delete process.env.UPSTASH_REDIS_REST_URL;
+    delete process.env.UPSTASH_REDIS_REST_TOKEN;
+  });
 
   afterEach(() => {
     process.env.KV_REST_API_URL = saved.url;
     process.env.KV_REST_API_TOKEN = saved.token;
+    process.env.UPSTASH_REDIS_REST_URL = saved.upstashUrl;
+    process.env.UPSTASH_REDIS_REST_TOKEN = saved.upstashToken;
     vi.unstubAllGlobals();
     __resetMemoryKv();
   });
@@ -34,6 +46,23 @@ describe("kvBackend", () => {
   it("exige les DEUX variables : une URL seule ne suffit pas", () => {
     process.env.KV_REST_API_URL = "https://example.upstash.io";
     delete process.env.KV_REST_API_TOKEN;
+    expect(kvBackend()).toBe("memory");
+  });
+
+  it("accepte aussi les noms UPSTASH_REDIS_REST_* d'une base créée hors Vercel", () => {
+    delete process.env.KV_REST_API_URL;
+    delete process.env.KV_REST_API_TOKEN;
+    process.env.UPSTASH_REDIS_REST_URL = "https://example.upstash.io";
+    process.env.UPSTASH_REDIS_REST_TOKEN = "jeton";
+    expect(kvBackend()).toBe("redis");
+  });
+
+  it("refuse une chaîne redis:// : l'intégration Redis TCP n'expose pas d'API REST", () => {
+    // Piège réel : l'intégration « Redis » du Marketplace Vercel ne fournit
+    // qu'un REDIS_URL en TCP. Le coller dans KV_REST_API_URL produirait des
+    // échecs réseau à chaque commande plutôt qu'un repli franc.
+    process.env.KV_REST_API_URL = "redis://default:motdepasse@abc.redis.io:6379";
+    process.env.KV_REST_API_TOKEN = "jeton";
     expect(kvBackend()).toBe("memory");
   });
 });
