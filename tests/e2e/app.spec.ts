@@ -171,6 +171,10 @@ test("le moteur vidéo se charge effectivement", async ({ page }) => {
   // rendu restait figé sur « Chargement du moteur vidéo » à 0 %, sans la
   // moindre erreur en console. Aucun test unitaire n'aurait vu ça : seul le
   // chargement réel dans un navigateur le révèle.
+  // Le module est importé par son chemin source, que seul le serveur de dev
+  // expose : contre un déploiement (E2E_BASE_URL) les sources sont bundlées
+  // et ce chemin n'existe pas. Le test d'import vidéo, lui, couvre la prod.
+  test.skip(Boolean(process.env.E2E_BASE_URL), "chemin source absent d'un build");
   test.slow();
   await page.goto("/", { waitUntil: "networkidle" });
 
