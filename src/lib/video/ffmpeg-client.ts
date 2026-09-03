@@ -6,27 +6,30 @@ import type { FFmpeg as FFmpegType } from "@ffmpeg/ffmpeg";
 // externe dans le chemin critique.
 import coreUrl from "@ffmpeg/core?url";
 import wasmUrl from "@ffmpeg/core/wasm?url";
-import coreMtUrl from "@ffmpeg/core-mt?url";
-import wasmMtUrl from "@ffmpeg/core-mt/wasm?url";
-import workerMtUrl from "@ffmpeg/core-mt/worker?url";
 
 let instance: FFmpegType | null = null;
 let loading: Promise<FFmpegType> | null = null;
 let multiThread = false;
 
 /**
- * Le cœur multi-thread n'est chargeable que si le navigateur nous place en
- * contexte isolé (`crossOriginIsolated`), ce qui suppose les en-têtes
- * `Cross-Origin-Opener-Policy: same-origin` et
- * `Cross-Origin-Embedder-Policy: credentialless` servis par l'hébergeur.
+ * Indique si le navigateur nous accorde l'isolation cross-origin, condition
+ * *nécessaire* au multi-thread — mais pas suffisante ici.
  *
- * On ne se fie pas aux en-têtes : on interroge le navigateur. Deux raisons.
- * D'abord Safari n'implémente pas `credentialless`, l'isolation n'y est donc
- * pas accordée même en présence des en-têtes. Ensuite un contexte non isolé
- * n'expose pas `SharedArrayBuffer`, dont dépend le cœur multi-thread : le
- * charger quand même échouerait au lancement du rendu.
+ * ⚠️ Le cœur `@ffmpeg/core-mt` n'est PAS utilisé, malgré l'isolation servie en
+ * production. Emscripten y démarre ses threads en chargeant un second script,
+ * `ffmpeg-core.worker.js`, dont il calcule l'adresse **relativement au cœur**.
+ * Notre bundler renomme les fichiers avec une empreinte
+ * (`ffmpeg-core-CcyiuWOr.js`), l'adresse déduite ne correspond à rien, et la
+ * requête n'aboutit jamais. Symptôme observé en production : le rendu reste
+ * figé sur « Chargement du moteur vidéo » à 0 %, **sans aucune erreur** —
+ * `ff.load()` ne rejette pas, il attend un worker qui ne viendra pas.
  *
- * Le repli mono-thread est plus lent mais fonctionnellement identique.
+ * Le rétablir demande de servir les trois fichiers du cœur côte à côte sous
+ * des noms stables (par exemple depuis `public/`), pas un simple import `?url`.
+ *
+ * Cette fonction reste exportée : elle documente la condition et sert au
+ * diagnostic. Les en-têtes COOP/COEP sont conservés — ils sont inoffensifs et
+ * évitent d'avoir à refaire ce travail le jour où le cœur MT sera câblé.
  */
 export function canUseMultiThread(): boolean {
   return (
@@ -72,15 +75,11 @@ export async function getFfmpeg(onLog?: (m: string) => void, onProgress?: (p: nu
     // Les fichiers sont déjà servis par notre propre origine : le détour par
     // un blob n'apportait rien. On économise au passage la recopie en mémoire
     // des 32 Mo du .wasm.
-    // Cœur multi-thread quand le navigateur nous accorde l'isolation
-    // cross-origin, mono-thread sinon. Voir `canUseMultiThread()`.
-    if (canUseMultiThread()) {
-      multiThread = true;
-      await ff.load({ coreURL: coreMtUrl, wasmURL: wasmMtUrl, workerURL: workerMtUrl });
-    } else {
-      multiThread = false;
-      await ff.load({ coreURL: coreUrl, wasmURL: wasmUrl });
-    }
+    // Cœur MONO-THREAD, y compris en contexte isolé. Voir la note sur
+    // `canUseMultiThread()` : le cœur multi-thread ne fonctionne pas avec
+    // notre bundler et faisait geler le rendu à « Chargement du moteur ».
+    multiThread = false;
+    await ff.load({ coreURL: coreUrl, wasmURL: wasmUrl });
 
     instance = ff;
     return ff;

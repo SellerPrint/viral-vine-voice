@@ -90,13 +90,19 @@ test("un fichier trop lourd est refusé avec un message explicite", async ({ pag
   const input = page.locator('input[type="file"]');
   await expect(input).toBeAttached();
 
-  // Playwright refuse un buffer de plus de 50 Mo : on fabrique donc le
-  // fichier côté navigateur, ce qui teste exactement le même chemin.
+  // Playwright refuse un buffer de plus de 50 Mo : le fichier est donc
+  // fabriqué côté navigateur, ce qui emprunte exactement le même chemin.
+  //
+  // On déclare une taille de 61 Mo au lieu d'allouer 61 Mo réels : le
+  // garde-fou de l'application lit `file.size`, c'est donc bien lui qu'on
+  // exerce. Allouer pour de vrai faisait mourir l'onglet dans les
+  // environnements à mémoire contrainte — un « Target crashed » trompeur,
+  // qui ressemble à un bug applicatif alors que le test seul est en cause.
   await page.evaluate(() => {
     const input = document.querySelector('input[type="file"]');
     if (!(input instanceof HTMLInputElement)) throw new Error("champ fichier introuvable");
-    const blob = new Blob([new Uint8Array(61 * 1024 * 1024)], { type: "video/mp4" });
-    const file = new File([blob], "trop-lourd.mp4", { type: "video/mp4" });
+    const file = new File([new Uint8Array(1024)], "trop-lourd.mp4", { type: "video/mp4" });
+    Object.defineProperty(file, "size", { value: 61 * 1024 * 1024 });
     const transfer = new DataTransfer();
     transfer.items.add(file);
     input.files = transfer.files;
@@ -156,4 +162,36 @@ test("/api/health rapporte l'état du stockage partagé", async ({ request }) =>
   const raw = JSON.stringify(body);
   expect(raw).not.toContain("upstash.io");
   expect(raw).not.toMatch(/Bearer|KV_REST_API_TOKEN=/);
+});
+
+test("le moteur vidéo se charge effectivement", async ({ page }) => {
+  // Régression vécue en production : avec `@ffmpeg/core-mt`, `ff.load()`
+  // n'échouait pas — il attendait indéfiniment un `ffmpeg-core.worker.js`
+  // introuvable (le bundler renomme les fichiers avec une empreinte). Le
+  // rendu restait figé sur « Chargement du moteur vidéo » à 0 %, sans la
+  // moindre erreur en console. Aucun test unitaire n'aurait vu ça : seul le
+  // chargement réel dans un navigateur le révèle.
+  test.slow();
+  await page.goto("/", { waitUntil: "networkidle" });
+
+  const result = await page.evaluate(async () => {
+    // Le chemin est résolu par le serveur de dev, pas par TypeScript : il
+    // passe par une variable pour que `tsc` ne tente pas de le résoudre.
+    const specifier = "/src/lib/video/ffmpeg-client.ts";
+    const mod = (await import(specifier)) as {
+      getFfmpeg: () => Promise<unknown>;
+      isMultiThread: () => boolean;
+    };
+    const ffmpeg = await Promise.race([
+      mod.getFfmpeg(),
+      new Promise((_, reject) => setTimeout(() => reject(new Error("timeout 60s")), 60_000)),
+    ]);
+    return { loaded: Boolean(ffmpeg), multiThread: mod.isMultiThread() };
+  });
+
+  expect(result.loaded).toBe(true);
+  // Le cœur multi-thread est volontairement désactivé : voir la note sur
+  // `canUseMultiThread()`. Ce test échouera si quelqu'un le réactive sans
+  // avoir d'abord réglé la résolution du worker.
+  expect(result.multiThread).toBe(false);
 });

@@ -29,7 +29,22 @@ export default defineConfig({
     trace: "retain-on-failure",
   },
 
-  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
+  projects: [
+    {
+      name: "chromium",
+      use: {
+        ...devices["Desktop Chrome"],
+        launchOptions: {
+          // Deux tests allouent beaucoup de mémoire dans la page : le buffer
+          // de 61 Mo et le cœur FFmpeg (~32 Mo de .wasm). Chromium utilise
+          // /dev/shm par défaut, souvent limité à 64 Mo dans un conteneur —
+          // au-delà l'onglet meurt avec un « Target crashed » qui ressemble à
+          // tort à un bug applicatif.
+          args: ["--disable-dev-shm-usage"],
+        },
+      },
+    },
+  ],
 
   // Aucun serveur a demarrer si l'on teste une URL deja deployee.
   webServer: process.env.E2E_BASE_URL
