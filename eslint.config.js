@@ -15,7 +15,9 @@ export default tseslint.config(
       globals: globals.browser,
       // Requis par les regles typees ci-dessous.
       parserOptions: {
-        projectService: { allowDefaultProject: ["vitest.config.ts"] },
+        projectService: {
+          allowDefaultProject: ["vitest.config.ts", "playwright.config.ts"],
+        },
         tsconfigRootDir: import.meta.dirname,
       },
     },
