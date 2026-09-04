@@ -233,13 +233,27 @@ describe("masquage du sous-titre d'origine (régressions)", () => {
     }
   });
 
-  it("aplatit la zone masquée avec une plaque opaque en plus du flou", () => {
+  it("floute la zone masquée sans l'aplatir par défaut", () => {
+    // Le comportement precedent — `boxblur=40:3` suivi d'une plaque noire a
+    // 55 % — transformait la zone en dalle uniforme et detruisait l'image.
+    // Le defaut « medium » rend le texte illisible en gardant la scene
+    // reconnaissable ; l'assombrissement est reserve a « strong ».
     const graph = buildGraph(
       baseInputs({ activeMasks: [{ x: 0, y: 1574, w: 1080, h: 268 }] }),
       allOn,
     );
-    expect(graph).toContain("boxblur=40:3");
-    expect(graph).toMatch(/boxblur=40:3,drawbox=[^[]*t=fill/);
+
+    expect(graph).toContain("boxblur=");
+    expect(graph).not.toContain("black@0.55");
+    expect(graph).not.toMatch(/boxblur=[^[]*drawbox/);
+  });
+
+  it("assombrit la zone uniquement en intensité forte", () => {
+    const graph = buildGraph(
+      baseInputs({ activeMasks: [{ x: 0, y: 1574, w: 1080, h: 268 }], maskStrength: "strong" }),
+      allOn,
+    );
+    expect(graph).toMatch(/boxblur=[^[]*drawbox=[^[]*t=fill/);
   });
 });
 

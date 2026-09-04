@@ -84,6 +84,10 @@ export function SettingsPanel({
         // Sans cela l'aperçu utiliserait Roboto quelle que soit la langue et
         // afficherait des carrés là où le rendu final sera correct.
         languageCode: targetLanguage.code,
+        // Les zones floutées étaient absentes de l'aperçu : on ne pouvait
+        // juger de leur effet qu'après un rendu complet.
+        masks,
+        maskStrength: options.maskStrength,
       });
       setPreviewUrl((old) => {
         if (old) URL.revokeObjectURL(old);
@@ -429,13 +433,13 @@ export function SettingsPanel({
           {previewUrl ? (
             <img
               src={previewUrl}
-              alt="Aperçu du rendu avec les filtres et le style de sous-titres"
+              alt="Aperçu du rendu : filtre, sous-titres et zones floutées"
               className="mt-3 w-full rounded-lg"
             />
           ) : (
             <p className="mt-2 text-xs text-muted-foreground">
               L'aperçu est calculé par FFmpeg sur une image de la vidéo : il reflète exactement le
-              rendu final, filtre et sous-titres compris.
+              rendu final — filtre, sous-titres et zones floutées comprises.
             </p>
           )}
         </div>
@@ -597,6 +601,43 @@ export function SettingsPanel({
           >
             {detecting ? "Analyse…" : "Détection auto"}
           </button>
+        </div>
+
+        {/* --------------------------- intensité du flou -------------------------- */}
+        <div className="mt-3">
+          <p className="text-xs font-medium text-muted-foreground">Intensité du floutage</p>
+          <div className="mt-2 flex gap-2">
+            {(
+              [
+                ["light", "Léger", "Adoucit sans effacer"],
+                ["medium", "Moyen", "Texte illisible, scène préservée"],
+                ["strong", "Fort", "Texte incrusté tenace"],
+              ] as const
+            ).map(([value, label, hint]) => (
+              <button
+                key={value}
+                type="button"
+                title={hint}
+                onClick={() => setOption("maskStrength", value)}
+                className={`flex-1 rounded-lg border px-2 py-1.5 text-xs transition ${
+                  options.maskStrength === value
+                    ? "border-primary bg-primary/15 font-semibold text-primary"
+                    : "border-border text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {
+              {
+                light: "Flou discret : la zone reste lisible dans les grandes lignes.",
+                medium: "Le texte devient illisible, les couleurs et la lumière sont conservées.",
+                strong: "Flou maximal et léger assombrissement, pour un texte très contrasté.",
+              }[options.maskStrength]
+            }
+          </p>
         </div>
 
         {videoUrl && (

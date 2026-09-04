@@ -232,6 +232,8 @@ export type PipelineOptions = {
   removeOriginalAudio?: boolean;
   /** Volume de l'ambiance d'origine sous la voix off, de 0 a 1. */
   ambienceLevel?: number;
+  /** Intensite du floutage des zones masquees. */
+  maskStrength?: "light" | "medium" | "strong";
   /** Moteur de synthèse vocale */
   ttsProvider?: TtsProvider;
   /** Identifiant de la voix clonée (ai33.pro) */

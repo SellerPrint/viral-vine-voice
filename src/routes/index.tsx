@@ -164,6 +164,7 @@ function Home() {
           wordByWord: renderOptions.wordByWord,
           removeOriginalAudio: renderOptions.removeOriginalAudio,
           ambienceLevel: renderOptions.ambienceLevel,
+          maskStrength: renderOptions.maskStrength,
           cutSilences: renderOptions.cutSilences,
           mirror: renderOptions.mirror,
           ttsProvider: renderOptions.ttsProvider,

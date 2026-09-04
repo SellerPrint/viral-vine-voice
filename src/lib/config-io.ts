@@ -84,6 +84,7 @@ const optionsSchema = z
     transitionDuration: z.number().finite().min(0.1).max(3),
     subtitleOpacity: zeroToOne,
     ambienceLevel: zeroToOne,
+    maskStrength: z.enum(["light", "medium", "strong"]),
   })
   // `.partial()` AVANT `.strict()` : dans l'autre ordre, `partial()` reconstruit
   // l'objet et perd le mode strict — une cle inconnue passait alors sans bruit.

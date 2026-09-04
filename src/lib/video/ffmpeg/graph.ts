@@ -28,6 +28,8 @@ export type GraphInputs = {
    * un telephone : la voix off semblait posee sur du silence.
    */
   ambienceLevel?: number;
+  /** Intensite du floutage des zones masquees. Defaut : « medium ». */
+  maskStrength?: MaskStrength;
   remap: (t: number) => number;
   /** Filtre colorimetrique facultatif. */
   filterId?: string;
@@ -81,6 +83,53 @@ export function resolveMasks(masks: MaskZone[], videoWidth: number, videoHeight:
     })
     .filter((m) => m.w >= 16 && m.h >= 16 && m.x + m.w <= videoWidth && m.y + m.h <= videoHeight)
     .slice(0, 4);
+}
+
+/**
+ * Intensite du floutage des zones masquees.
+ *
+ * L'ancien traitement etait unique et brutal : `boxblur=40:3` suivi d'une
+ * plaque noire a 55 %. Le resultat etait une dalle grise qui detruisait
+ * l'image bien au-dela du texte a cacher. Trois niveaux permettent d'adapter
+ * la force au besoin reel.
+ */
+export type MaskStrength = "light" | "medium" | "strong";
+
+/**
+ * Construit la chaine de floutage d'une zone.
+ *
+ * Le rayon est **proportionnel a la taille de la zone**, non fixe : `boxblur=40`
+ * sur un bandeau de 60 px de haut le reduit en bouillie, alors que le meme
+ * rayon sur une zone 4K est a peine visible. On derive donc le rayon de la
+ * plus petite dimension, borne pour rester dans les limites de `boxblur`.
+ *
+ * La plaque assombrissante n'est ajoutee qu'en mode `strong`, ou l'objectif
+ * est de garantir l'illisibilite d'un texte incruste. En `light` et `medium`,
+ * le flou seul preserve les couleurs et la luminosite de la scene.
+ */
+export function buildBlurChain(strength: MaskStrength, rect: Rect): string {
+  const minSide = Math.max(8, Math.min(rect.w, rect.h));
+
+  const profile = {
+    // Adoucit sans effacer : suffisant pour un logo ou un pseudo.
+    light: { ratio: 0.04, passes: 1, plate: 0 },
+    // Defaut : le texte devient illisible, la scene reste reconnaissable.
+    medium: { ratio: 0.08, passes: 2, plate: 0 },
+    // Texte incruste tenace : flou maximal + plaque legere.
+    strong: { ratio: 0.14, passes: 3, plate: 0.35 },
+  }[strength];
+
+  // `boxblur` refuse un rayon superieur a la moitie de la dimension, et un
+  // rayon inferieur a 1 est un no-op silencieux.
+  const radius = Math.max(
+    1,
+    Math.min(Math.round(minSide * profile.ratio), Math.floor(minSide / 2) - 1),
+  );
+
+  const chain = `boxblur=${radius}:${profile.passes}`;
+  return profile.plate > 0
+    ? `${chain},drawbox=x=0:y=0:w=iw:h=ih:color=black@${profile.plate.toFixed(2)}:t=fill`
+    : chain;
 }
 
 /** Applique une opacite a une couleur FFmpeg (`black`, `#RRGGBB`, `x@0.5`). */
@@ -163,6 +212,7 @@ export function buildGraph(inputs: GraphInputs, toggles: GraphToggles): string {
   const { activeMasks, keeps, hasAudio, hasVoice, mirror } = inputs;
   // Borne defensive : une valeur hors [0,1] produirait une saturation.
   const ambience = Math.min(1, Math.max(0, inputs.ambienceLevel ?? 0.25));
+  const maskStrength = inputs.maskStrength ?? "medium";
   const cuts = toggles.cuts && keeps.length > 1;
 
   // Transitions : uniquement s'il y a bien plusieurs segments a raccorder.
@@ -257,10 +307,7 @@ export function buildGraph(inputs: GraphInputs, toggles: GraphToggles): string {
   if (toggles.masks && activeMasks.length) {
     graph += `[${videoIn}]split=${activeMasks.length + 1}[base]${activeMasks.map((_, i) => `[z${i}]`).join("")};`;
     activeMasks.forEach((mask, i) => {
-      // Le flou seul ne suffit pas : un sous-titre incrusté reste lisible même
-      // à fort rayon. On floute puis on aplatit la zone avec une plaque quasi
-      // opaque, ce qui garantit l'illisibilité tout en gardant la teinte locale.
-      graph += `[z${i}]crop=${mask.w}:${mask.h}:${mask.x}:${mask.y},boxblur=40:3,drawbox=x=0:y=0:w=iw:h=ih:color=black@0.55:t=fill[b${i}];`;
+      graph += `[z${i}]crop=${mask.w}:${mask.h}:${mask.x}:${mask.y},${buildBlurChain(maskStrength, mask)}[b${i}];`;
     });
     let previous = "base";
     activeMasks.forEach((mask, i) => {

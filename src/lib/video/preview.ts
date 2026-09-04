@@ -12,8 +12,15 @@
 import { buildLookFilters, type UpscaleMode } from "./filters";
 import { getFfmpeg, writeFileSafe } from "./ffmpeg-client";
 import { loadFont } from "./font";
-import { buildStyleBits, withOpacity } from "./ffmpeg/graph";
-import type { SubtitlePreset } from "./presets";
+import {
+  buildBlurChain,
+  buildStyleBits,
+  type MaskStrength,
+  type Rect,
+  resolveMasks,
+  withOpacity,
+} from "./ffmpeg/graph";
+import type { MaskZone, SubtitlePreset } from "./presets";
 import { wrapLines } from "./subtitles/cues";
 
 export type PreviewOptions = {
@@ -29,8 +36,67 @@ export type PreviewOptions = {
   atSecond?: number;
   /** Code de langue cible : choisit la police (arabe, hindi, CJK...). */
   languageCode?: string;
+  /**
+   * Zones a flouter.
+   *
+   * L'apercu les ignorait : on ne pouvait juger de leur effet qu'apres un
+   * rendu complet, alors que c'est precisement le reglage qui abime le plus
+   * l'image quand il est mal place.
+   */
+  masks?: MaskZone[];
+  /** Intensite du floutage, alignee sur le rendu final. */
+  maskStrength?: MaskStrength;
   signal?: AbortSignal;
 };
+
+/**
+ * Construit les arguments de filtrage de l'apercu.
+ *
+ * Extrait de `renderPreviewFrame` pour etre **testable sans WebAssembly** :
+ * la logique de graphe est la partie qui casse silencieusement, alors que
+ * l'execution ffmpeg elle-meme est deja couverte par les tests e2e.
+ *
+ * Sans masque, un simple `-vf` suffit. Des qu'une zone est floutee il faut un
+ * `-filter_complex` : `crop` + `overlay` exigent un graphe ramifie, impossible
+ * a exprimer dans une chaine lineaire.
+ */
+export function buildPreviewArgs(
+  rects: Rect[],
+  chain: string[],
+  lookChain: string,
+  maskStrength: MaskStrength,
+): string[] {
+  if (!rects.length) {
+    return chain.length ? ["-vf", chain.join(",")] : [];
+  }
+
+  // `chain` commence par la chaine « look » quand elle existe ; le reste
+  // concerne le texte, qui doit passer APRES les masques.
+  const textChain = lookChain ? chain.slice(1) : chain;
+
+  let complex = `[0:v]${lookChain ? `${lookChain},` : ""}split=${rects.length + 1}[base]${rects
+    .map((_, i) => `[z${i}]`)
+    .join("")};`;
+
+  rects.forEach((rect, i) => {
+    complex += `[z${i}]crop=${rect.w}:${rect.h}:${rect.x}:${rect.y},${buildBlurChain(
+      maskStrength,
+      rect,
+    )}[b${i}];`;
+  });
+
+  let previous = "base";
+  rects.forEach((rect, i) => {
+    const out = i === rects.length - 1 ? "masked" : `o${i}`;
+    complex += `[${previous}][b${i}]overlay=${rect.x}:${rect.y}[${out}];`;
+    previous = out;
+  });
+
+  // `null` : un graphe doit relier [masked] a [vout] meme sans filtre de texte.
+  complex += `[masked]${textChain.length ? textChain.join(",") : "null"}[vout]`;
+
+  return ["-filter_complex", complex, "-map", "[vout]"];
+}
 
 /**
  * Genere une image d'apercu et renvoie une URL d'objet.
@@ -51,6 +117,8 @@ export async function renderPreviewFrame(
     subYAnchor,
     atSecond = 1,
     languageCode,
+    masks,
+    maskStrength = "medium",
     signal,
   } = options;
 
@@ -69,7 +137,17 @@ export async function renderPreviewFrame(
     const chain: string[] = [];
 
     const look = buildLookFilters(filterId, upscale, videoWidth, videoHeight);
+    const lookChain = look || "";
     if (look) chain.push(look);
+
+    // Les masques s'appliquent avant le texte, exactement comme dans
+    // `buildGraph` : un sous-titre incruste par l'application ne doit jamais
+    // etre floute par une zone.
+    //
+    // `crop`+`overlay` est impossible dans un `-vf` simple (une seule chaine
+    // lineaire). On utilise donc l'astuce des filtres `enable` de `boxblur`
+    // via un filtergraph complet lorsqu'il y a des masques.
+    const rects = masks ? resolveMasks(masks, videoWidth, videoHeight) : [];
 
     // L'apercu du texte reprend `buildStyleBits`, donc toute evolution du
     // style se reflete ici sans duplication de logique.
@@ -94,9 +172,19 @@ export async function renderPreviewFrame(
       );
     }
 
-    const args = ["-y", "-ss", String(atSecond), "-i", input];
-    if (chain.length) args.push("-vf", chain.join(","));
-    args.push("-frames:v", "1", "-q:v", "3", output);
+    const args = [
+      "-y",
+      "-ss",
+      String(atSecond),
+      "-i",
+      input,
+      ...buildPreviewArgs(rects, chain, lookChain, maskStrength),
+      "-frames:v",
+      "1",
+      "-q:v",
+      "3",
+      output,
+    ];
 
     const code = await ff.exec(args);
     if (code !== 0) throw new Error("L'aperçu n'a pas pu être généré.");
