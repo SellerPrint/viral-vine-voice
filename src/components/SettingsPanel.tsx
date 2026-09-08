@@ -15,6 +15,7 @@ import {
   MAX_CONFIG_BYTES,
   parseConfig,
 } from "@/lib/config-io";
+import { describe } from "@/lib/errors";
 import { isSameLanguage, SOURCE_LANGUAGES, type SourceLanguage } from "@/lib/languages";
 import { detectMaskZones } from "@/lib/video/detect";
 import { VIDEO_FILTERS, UPSCALE_MODES } from "@/lib/video/filters";
@@ -94,7 +95,7 @@ export function SettingsPanel({
         return url;
       });
     } catch (e) {
-      setPreviewError(e instanceof Error ? e.message : "Aperçu impossible.");
+      setPreviewError(describe(e, "Aperçu impossible."));
     } finally {
       setPreviewing(false);
     }

@@ -1,3 +1,4 @@
+import { describe } from "@/lib/errors";
 import { synthesizeSpeech } from "@/lib/ai.functions";
 import { base64ToBytes, exactArrayBuffer } from "@/lib/base64";
 import { mapLimit } from "@/lib/concurrency";
@@ -47,13 +48,16 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** Extrait un motif court et lisible d'une erreur de synthèse. */
 export function describeTtsFailure(error: unknown): string {
-  const raw = error instanceof Error ? error.message : String(error);
+  // `describe()` plutot que `String()` : une erreur serialisee par le serveur
+  // n'est plus une `Error`, et `String()` en tirait « [object Object] », qui
+  // ne correspondait alors a aucun motif ci-dessous.
+  const raw = describe(error, "");
   if (/\b429\b|rate.?limit|trop de requ/i.test(raw)) return "limite de débit atteinte";
   if (/\b401\b|\b403\b|api.?key|unauthoriz/i.test(raw)) return "clé API refusée";
   if (/quota|credit|insufficient/i.test(raw)) return "quota épuisé";
   if (/\b5\d\d\b|internal|unavailable/i.test(raw)) return "service indisponible";
   if (/network|fetch|timeout|ECONN/i.test(raw)) return "réseau instable";
-  return raw.slice(0, 80);
+  return raw ? raw.slice(0, 80) : "cause inconnue";
 }
 
 /**

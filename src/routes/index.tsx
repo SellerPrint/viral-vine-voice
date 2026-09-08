@@ -11,6 +11,7 @@ import {
   type SubtitlePreset,
   type TargetLanguage,
 } from "@/lib/video/presets";
+import { describe } from "@/lib/errors";
 import { DEFAULT_SOURCE_LANGUAGE, type SourceLanguage } from "@/lib/languages";
 import { useTurnstile } from "@/hooks/use-turnstile";
 import { SettingsPanel } from "@/components/SettingsPanel";
@@ -124,7 +125,7 @@ function Home() {
       setFile({ name: f.name, size: f.size, bytes });
     } catch (e) {
       setFile(null);
-      setError(e instanceof Error ? e.message : String(e));
+      setError(describe(e, "La vidéo n'a pas pu être lue."));
     } finally {
       setCopying(false);
       setDetail("");
@@ -190,7 +191,10 @@ function Home() {
         setPct(0);
       } else {
         console.error(e);
-        setError(e instanceof Error ? e.message : String(e));
+        // `String(e)` affichait « [object Object] » des que l'erreur venait
+        // du serveur : TanStack Start la serialise, et ce n'est plus une
+        // instance d'`Error` a l'arrivee.
+        setError(describe(e, "Le rendu a échoué pour une raison inconnue."));
         setStep("error");
       }
     } finally {
