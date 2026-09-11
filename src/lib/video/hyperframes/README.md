@@ -3,6 +3,7 @@
 ## 🎯 Objectif
 
 Remplacer les presets FFmpeg drawtext statiques par des sous-titres animés HyperFrames avec :
+
 - Animations mot par mot (word-by-word)
 - Effets pop/scale fluides
 - Transitions riches entre segments
@@ -29,7 +30,7 @@ const result = await runPipeline(
     // HyperFrames est activé par défaut
     useHyperFrames: true,
     hyperframesPreset: HYPERFRAMES_PRESETS[0], // TikTok Pop
-  }
+  },
 );
 ```
 
@@ -82,12 +83,12 @@ document.body.appendChild(iframe);
 
 ## 🎨 Presets disponibles
 
-| ID | Nom | Description |
-|---|---|---|
-| `tiktok-pop` | TikTok Pop | blanc avec contour noir, animation pop |
-| `capcut-yellow` | CapCut Jaune | jaune doré, effet highlight |
-| `minimal-white` | Minimal Blanc | fond sombre, discret |
-| `highlight-box` | Highlight Box | fond rouge, mise en valeur |
+| ID              | Nom           | Description                            |
+| --------------- | ------------- | -------------------------------------- |
+| `tiktok-pop`    | TikTok Pop    | blanc avec contour noir, animation pop |
+| `capcut-yellow` | CapCut Jaune  | jaune doré, effet highlight            |
+| `minimal-white` | Minimal Blanc | fond sombre, discret                   |
+| `highlight-box` | Highlight Box | fond rouge, mise en valeur             |
 
 ## ⚙️ Configuration
 
@@ -95,9 +96,9 @@ document.body.appendChild(iframe);
 
 ```typescript
 type HyperFramesPipelineOptions = {
-  useHyperFrames?: boolean;        // Défaut: true
+  useHyperFrames?: boolean; // Défaut: true
   hyperframesPreset?: HyperFramesPreset;
-  clientSideRender?: boolean;      // Défaut: false
+  clientSideRender?: boolean; // Défaut: false
   // ... autres options PipelineOptions
 };
 ```
@@ -148,6 +149,7 @@ console.log(html); // HTML complet à inspecter
 ### Logs détaillés
 
 Le pipeline log les étapes importantes :
+
 ```
 [compose] Rendu des sous-titres animés HyperFrames…
 [HyperFrames] Producer disponible: true

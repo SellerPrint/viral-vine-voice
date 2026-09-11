@@ -22,26 +22,16 @@ import { getFfmpeg, writeFileSafe } from "./ffmpeg-client";
 import { loadFont } from "./font";
 import { resolveMasks, type GraphInputs } from "./ffmpeg/graph";
 import { renderWithFallback } from "./ffmpeg/render";
-import {
-  DEFAULT_MASKS,
-  SUBTITLE_PRESETS,
-  resolvePreset,
-  type PipelineOptions,
-} from "./presets";
+import { DEFAULT_MASKS, SUBTITLE_PRESETS, resolvePreset, type PipelineOptions } from "./presets";
 import { remapTimeWithTransitions, transitionDurations } from "./transitions";
-import {
-  buildCues,
-  groupWordsToSegments,
-  wrapLines,
-  type Segment,
-} from "./subtitles/cues";
+import { buildCues, groupWordsToSegments, wrapLines, type Segment } from "./subtitles/cues";
 
 // HyperFrames integration
 import {
-  renderSubtitlesWithHyperFrames,
   overlaySubtitlesOnVideo,
-  type HyperFramesPreset,
+  renderSubtitlesWithHyperFrames,
   HYPERFRAMES_PRESETS,
+  type HyperFramesPreset,
 } from "./hyperframes";
 
 export type { Segment, Word, Cue } from "./subtitles/cues";
@@ -51,11 +41,7 @@ export { buildGraph, buildStyleBits, resolveMasks } from "./ffmpeg/graph";
 
 export type VideoInput = { name: string; bytes: Uint8Array };
 
-export type ProgressCb = (
-  step: string,
-  detail?: string,
-  pct?: number
-) => void;
+export type ProgressCb = (step: string, detail?: string, pct?: number) => void;
 
 export type PipelineResult = {
   videoBlob: Blob;
@@ -88,28 +74,17 @@ export async function runPipeline(
   const signal = opts?.signal;
   const useHyperFrames = opts?.useHyperFrames !== false; // Défaut: true
   const hyperframesPreset = opts?.hyperframesPreset ?? HYPERFRAMES_PRESETS[0];
-  const clientSideRender = opts?.clientSideRender === true;
 
-  const preset = resolvePreset(
-    opts?.preset ?? SUBTITLE_PRESETS[0],
-    opts?.overrides ?? {}
-  );
+  const preset = resolvePreset(opts?.preset ?? SUBTITLE_PRESETS[0], opts?.overrides ?? {});
   const masks = opts?.masks ?? DEFAULT_MASKS;
-  const sourceLanguage =
-    opts?.sourceLanguage ?? DEFAULT_SOURCE_LANGUAGE;
-  const targetLanguage = opts?.targetLanguage ?? {
-    code: "en",
-    label: "Anglais",
-    name: "English",
-  };
+  const sourceLanguage = opts?.sourceLanguage ?? DEFAULT_SOURCE_LANGUAGE;
+  const targetLanguage = opts?.targetLanguage ?? { code: "en", label: "Anglais", name: "English" };
   const warnings: string[] = [];
 
   signal?.throwIfAborted();
 
   progress("ffmpeg", "Chargement du moteur vidéo…");
-  const ff = await getFfmpeg(undefined, (p) =>
-    progress("ffmpeg-progress", undefined, p)
-  );
+  const ff = await getFfmpeg(undefined, (p) => progress("ffmpeg-progress", undefined, p));
   const cleanupNames = new Set<string>();
 
   try {
@@ -123,17 +98,7 @@ export async function runPipeline(
     signal?.throwIfAborted();
 
     progress("extract", "Extraction audio…");
-    await ff.exec([
-      "-y",
-      "-i",
-      inputName,
-      "-vn",
-      "-ac",
-      "1",
-      "-ar",
-      "16000",
-      "audio.wav",
-    ]);
+    await ff.exec(["-y", "-i", inputName, "-vn", "-ac", "1", "-ar", "16000", "audio.wav"]);
     const wav = (await ff.readFile("audio.wav")) as Uint8Array;
     signal?.throwIfAborted();
 
@@ -148,9 +113,7 @@ export async function runPipeline(
     ff.off("log", handler);
 
     const probe = logs.join("\n");
-    const durMatch = probe.match(
-      /Duration:\s*(\d+):(\d+):(\d+\.\d+)/
-    );
+    const durMatch = probe.match(/Duration:\s*(\d+):(\d+):(\d+\.\d+)/);
     const duration = durMatch
       ? +durMatch[1] * 3600 + +durMatch[2] * 60 + parseFloat(durMatch[3])
       : 0;
@@ -158,10 +121,7 @@ export async function runPipeline(
     signal?.throwIfAborted();
 
     /* ----------------------------- transcription ---------------------------- */
-    progress(
-      "transcribe",
-      `Transcription multi-locuteurs (${sourceLanguage.label})…`
-    );
+    progress("transcribe", `Transcription multi-locuteurs (${sourceLanguage.label})…`);
     const audioB64 = arrayBufferToBase64(exactArrayBuffer(wav));
     const { words } = await transcribeAudio({
       signal,
@@ -177,18 +137,11 @@ export async function runPipeline(
     if (rawSegments.length === 0) throw new Error("Aucune parole détectée.");
 
     /* ------------------------------ traduction ------------------------------ */
-    progress(
-      "translate",
-      `Traduction + prosodie (${targetLanguage.name})…`
-    );
+    progress("translate", `Traduction + prosodie (${targetLanguage.name})…`);
     const { segments, untranslated } = await translateSegments({
       signal,
       data: {
-        segments: rawSegments.map((s) => ({
-          text: s.text,
-          start: s.start,
-          end: s.end,
-        })),
+        segments: rawSegments.map((s) => ({ text: s.text, start: s.start, end: s.end })),
         sourceLanguage: sourceLanguage.name,
         targetLanguage: targetLanguage.name,
         turnstileToken: opts?.turnstileToken,
@@ -197,13 +150,11 @@ export async function runPipeline(
 
     if (untranslated > 0) {
       warnings.push(
-        `${untranslated} segment${untranslated > 1 ? "s" : ""} n'${untranslated > 1 ? "ont" : "a"} pas pu être traduit${untranslated > 1 ? "s" : ""} : le texte d'origine est conservé.`
+        `${untranslated} segment${untranslated > 1 ? "s" : ""} n'${untranslated > 1 ? "ont" : "a"} pas pu être traduit${untranslated > 1 ? "s" : ""} : le texte d'origine est conservé.`,
       );
     }
 
-    const segs = segments as Array<
-      (typeof segments)[number] & { speakerId?: string }
-    >;
+    const segs = segments as Array<(typeof segments)[number] & { speakerId?: string }>;
     segs.forEach((segment, index) => {
       segment.speakerId = rawSegments[index]?.speakerId;
     });
@@ -213,21 +164,20 @@ export async function runPipeline(
     const narration = await composeNarrationWav(
       segments,
       duration,
-      (done, total) =>
-        progress("tts", `Voix off ${done}/${total}…`, done / total),
+      (done, total) => progress("tts", `Voix off ${done}/${total}…`, done / total),
       {
         provider: opts?.ttsProvider ?? "elevenlabs",
         clonedVoiceId: opts?.clonedVoiceId,
         turnstileToken: opts?.turnstileToken,
       },
-      signal
+      signal,
     );
 
     // Un échec partiel produisait auparavant une vidéo quasi muette annoncée
     // comme un succès complet.
     if (narration.total > 0 && narration.failed === narration.total) {
       warnings.push(
-        "La voix off n'a pu être générée sur aucun segment (quota ou clé API). La vidéo est rendue sans doublage."
+        "La voix off n'a pu être générée sur aucun segment (quota ou clé API). La vidéo est rendue sans doublage.",
       );
     } else if (narration.failed > 0) {
       // Le motif change tout : « limite de débit atteinte » invite à relancer,
@@ -237,7 +187,7 @@ export async function runPipeline(
         : "";
       warnings.push(
         `${narration.failed} segment${narration.failed > 1 ? "s" : ""} sur ${narration.total} sans voix off${why}. ` +
-          `Chaque segment a été retenté 3 fois avant abandon.`
+          `Chaque segment a été retenté 3 fois avant abandon.`,
       );
     }
 
@@ -247,7 +197,7 @@ export async function runPipeline(
     if (narration.overshoot > 0.3) {
       warnings.push(
         `La voix off dépasse d'environ ${narration.overshoot.toFixed(1)} s : la traduction est plus longue que la vidéo. ` +
-          `La narration a été accélérée au maximum. Pour un meilleur résultat, raccourcis la vidéo ou choisis une langue plus concise.`
+          `La narration a été accélérée au maximum. Pour un meilleur résultat, raccourcis la vidéo ou choisis une langue plus concise.`,
       );
     }
 
@@ -255,9 +205,7 @@ export async function runPipeline(
     signal?.throwIfAborted();
 
     /* ------------------------ coupure des silences -------------------------- */
-    const visible = segments
-      .filter((s) => s.textEn.trim())
-      .sort((a, b) => a.start - b.start);
+    const visible = segments.filter((s) => s.textEn.trim()).sort((a, b) => a.start - b.start);
     const wantCuts = opts?.cutSilences !== false && duration > 0;
 
     // Le silence est rogné contre la parole plutôt qu'écarté dès qu'il la
@@ -267,18 +215,14 @@ export async function runPipeline(
     const keeps = cutList.length ? keptIntervals(duration, cutList, 0) : [];
 
     if (wantCuts && !cutList.length && silences.length > 0) {
-      warnings.push(
-        "Aucun silence exploitable détecté : la vidéo garde son rythme d'origine."
-      );
+      warnings.push("Aucun silence exploitable détecté : la vidéo garde son rythme d'origine.");
     }
 
     /* -------------------------------- cues ---------------------------------- */
     const cues = buildCues(segments, opts?.wordByWord !== false);
 
     /* ------------------------------- masques -------------------------------- */
-    const sizeMatch = probe.match(
-      /Video:.*?[\s,](\d{2,5})x(\d{2,5})/
-    );
+    const sizeMatch = probe.match(/Video:.*?[\s,](\d{2,5})x(\d{2,5})/);
     const videoWidth = sizeMatch ? +sizeMatch[1] : 0;
     const videoHeight = sizeMatch ? +sizeMatch[2] : 0;
 
@@ -293,9 +237,7 @@ export async function runPipeline(
 
     const activeMasks = resolveMasks(masks, videoWidth, videoHeight);
 
-    const coverMask = masks.find(
-      (m) => m.enabled && (m.id === "bottom" || m.id === "top")
-    );
+    const coverMask = masks.find((m) => m.enabled && (m.id === "bottom" || m.id === "top"));
     const subYAnchor = coverMask
       ? Math.min(0.94, Math.max(0.06, coverMask.y + coverMask.h / 2))
       : preset.yAnchor;
@@ -311,15 +253,71 @@ export async function runPipeline(
     const transition = opts?.transition ?? "none";
     const transitionSeconds = opts?.transitionDuration ?? 0.3;
     const cutDurations =
-      transition === "none"
-        ? keeps.map(() => 0)
-        : transitionDurations(keeps, transitionSeconds);
+      transition === "none" ? keeps.map(() => 0) : transitionDurations(keeps, transitionSeconds);
+
+    /**
+     * Graphe FFmpeg commun aux chemins HyperFrames et drawtext.
+     *
+     * Sur le chemin HyperFrames les cues sont vides : les sous-titres sont
+     * déjà incrustés dans la vidéo d'entrée, il ne reste que masques, voix
+     * off, coupes et look à appliquer.
+     */
+    const buildGraphInputs = (withCues: boolean): GraphInputs => ({
+      cues: withCues ? cues : [],
+      subtitleFiles: withCues ? cues.map((_, i) => `subtitle_${i}.txt`) : [],
+      preset,
+      coverMask,
+      subYAnchor,
+      activeMasks,
+      keeps,
+      hasAudio,
+      hasVoice: Boolean(voiceWav),
+      mirror: opts?.mirror === true,
+      ambienceLevel: opts?.ambienceLevel,
+      maskStrength: opts?.maskStrength,
+      remap: (t) => remapTimeWithTransitions(t, keeps, cutDurations),
+      filterId: opts?.filterId,
+      upscale: opts?.upscale ?? "none",
+      videoWidth,
+      videoHeight,
+      fps: sourceFps,
+      transition,
+      transitionDuration: transitionSeconds,
+    });
+
+    /** Chemin drawtext classique : écrit les fichiers texte + la police. */
+    const renderWithDrawtext = async () => {
+      const subtitleFiles = cues.map((_, i) => `subtitle_${i}.txt`);
+
+      for (let i = 0; i < subtitleFiles.length; i++) {
+        const raw = preset.uppercase ? cues[i].text.toUpperCase() : cues[i].text;
+        const text = wrapLines(raw, preset.maxCharsPerLine, preset.maxLines).join("\n");
+        cleanupNames.add(subtitleFiles[i]);
+        await ff.writeFile(subtitleFiles[i], new TextEncoder().encode(text));
+      }
+
+      progress("compose", "Chargement de la police…");
+      cleanupNames.add("font.ttf");
+      // La police est mise en cache pour la session : la transferer la
+      // detacherait des le deuxieme rendu.
+      // La police depend de la langue cible : Roboto n'a aucun glyphe arabe,
+      // devanagari ni CJK, et les sous-titres sortaient en carres.
+      await writeFileSafe(ff, "font.ttf", await loadFont(signal, targetLanguage.code));
+
+      return renderWithFallback(ff, buildGraphInputs(true), {
+        inputName,
+        voiceFile: voiceWav ? "voice.wav" : null,
+        outputName: "output.mp4",
+        onProgress: (note) => progress("compose", note),
+        signal,
+      });
+    };
 
     /* -------------------------------- rendu --------------------------------- */
     progress("compose", "Assemblage final…");
     cleanupNames.add("output.mp4");
 
-    let outcome;
+    let outcome: Awaited<ReturnType<typeof renderWithFallback>>;
 
     if (useHyperFrames && cues.length > 0) {
       // ─── Chemin HyperFrames : sous-titres animés ────────────────────────
@@ -340,234 +338,62 @@ export async function runPipeline(
         if (subtitleResult.videoBlob.type.startsWith("video/")) {
           const inputFileData = await ff.readFile(inputName);
           // Convertir en ArrayBuffer compatible Blob
-          let inputArrayBuffer: ArrayBuffer;
-          if (inputFileData instanceof Uint8Array) {
-            inputArrayBuffer = inputFileData.buffer.slice(
-              inputFileData.byteOffset,
-              inputFileData.byteOffset + inputFileData.byteLength
-            ) as ArrayBuffer;
-          } else {
-            inputArrayBuffer = new TextEncoder().encode(String(inputFileData)).buffer as ArrayBuffer;
-          }
+          const inputArrayBuffer =
+            inputFileData instanceof Uint8Array
+              ? (inputFileData.buffer.slice(
+                  inputFileData.byteOffset,
+                  inputFileData.byteOffset + inputFileData.byteLength,
+                ) as ArrayBuffer)
+              : (new TextEncoder().encode(String(inputFileData)).buffer as ArrayBuffer);
           const originalBlob = new Blob([inputArrayBuffer], { type: "video/mp4" });
 
-          const finalBlob = await overlaySubtitlesOnVideo(
-            originalBlob,
-            cues,
-            {
-              preset: hyperframesPreset,
-              width: videoWidth || 1080,
-              height: videoHeight || 1920,
-            }
-          );
+          const finalBlob = await overlaySubtitlesOnVideo(originalBlob, cues, {
+            preset: hyperframesPreset,
+            width: videoWidth || 1080,
+            height: videoHeight || 1920,
+          });
 
+          // Copie ArrayBuffer : évite les problèmes de SharedArrayBuffer.
           const finalArrayBuffer = await finalBlob.arrayBuffer();
-          // Copie ArrayBuffer pour éviter les problèmes de SharedArrayBuffer
           const copiedBuffer = new ArrayBuffer(finalArrayBuffer.byteLength);
           new Uint8Array(copiedBuffer).set(new Uint8Array(finalArrayBuffer));
           const finalBytes = new Uint8Array(copiedBuffer);
-
-          // Appliquer les masques et la voix off si nécessaire
-          const graphInputs: GraphInputs = {
-            cues: [], // Pas de sous-titres FFmpeg
-            subtitleFiles: [],
-            preset,
-            coverMask,
-            subYAnchor,
-            activeMasks,
-            keeps,
-            hasAudio,
-            hasVoice: Boolean(voiceWav),
-            mirror: opts?.mirror === true,
-            ambienceLevel: opts?.ambienceLevel,
-            maskStrength: opts?.maskStrength,
-            remap: (t) => remapTimeWithTransitions(t, keeps, cutDurations),
-            filterId: opts?.filterId,
-            upscale: opts?.upscale ?? "none",
-            videoWidth,
-            videoHeight,
-            fps: sourceFps,
-            transition,
-            transitionDuration: transitionSeconds,
-          };
 
           // Écrire la vidéo avec sous-titres pour le traitement final
           cleanupNames.add("hf-output.mp4");
           await writeFileSafe(ff, "hf-output.mp4", finalBytes);
 
-          outcome = await renderWithFallback(
-            ff,
-            graphInputs,
-            {
-              inputName: "hf-output.mp4",
-              voiceFile: voiceWav ? "voice.wav" : null,
-              outputName: "output.mp4",
-              onProgress: (note) => progress("compose", note),
-              signal,
-            }
-          );
-        } else {
-          // Fallback : utiliser le rendu FFmpeg classique
-          progress("compose", "Fallback sur rendu FFmpeg classique…");
-          outcome = await renderWithFallback(
-            ff,
-            buildGraphInputs(
-              cues,
-              preset,
-              coverMask,
-              subYAnchor,
-              activeMasks,
-              keeps,
-              hasAudio,
-              voiceWav,
-              opts,
-              transition,
-              transitionSeconds,
-              cutDurations,
-              videoWidth,
-              videoHeight,
-              sourceFps
-            ),
-            {
-              inputName,
-              voiceFile: voiceWav ? "voice.wav" : null,
-              outputName: "output.mp4",
-              onProgress: (note) => progress("compose", note),
-              signal,
-            }
-          );
-        }
-      } catch (error) {
-        console.warn(
-          "[HyperFrames] Erreur, fallback sur FFmpeg classique:",
-          error
-        );
-        warnings.push(
-          "Rendu HyperFrames échoué, utilisation du rendu FFmpeg classique."
-        );
-
-        // Fallback : chemiin FFmpeg classique
-        const subtitleFiles = cues.map((_, i) => `subtitle_${i}.txt`);
-        for (let i = 0; i < subtitleFiles.length; i++) {
-          const raw = preset.uppercase
-            ? cues[i].text.toUpperCase()
-            : cues[i].text;
-          const text = wrapLines(
-            raw,
-            preset.maxCharsPerLine,
-            preset.maxLines
-          ).join("\n");
-          cleanupNames.add(subtitleFiles[i]);
-          await ff.writeFile(
-            subtitleFiles[i],
-            new TextEncoder().encode(text)
-          );
-        }
-
-        progress("compose", "Chargement de la police…");
-        cleanupNames.add("font.ttf");
-        await writeFileSafe(
-          ff,
-          "font.ttf",
-          await loadFont(signal, targetLanguage.code)
-        );
-
-        outcome = await renderWithFallback(
-          ff,
-          buildGraphInputs(
-            cues,
-            preset,
-            coverMask,
-            subYAnchor,
-            activeMasks,
-            keeps,
-            hasAudio,
-            voiceWav,
-            opts,
-            transition,
-            transitionSeconds,
-            cutDurations,
-            videoWidth,
-            videoHeight,
-            sourceFps
-          ),
-          {
-            inputName,
+          // Pas de cues : les sous-titres HyperFrames sont déjà incrustés.
+          outcome = await renderWithFallback(ff, buildGraphInputs(false), {
+            inputName: "hf-output.mp4",
             voiceFile: voiceWav ? "voice.wav" : null,
             outputName: "output.mp4",
             onProgress: (note) => progress("compose", note),
             signal,
-          }
-        );
+          });
+        } else {
+          // Pas de vidéo de sous-titres produite : chemin drawtext classique.
+          outcome = await renderWithDrawtext();
+        }
+      } catch (error) {
+        console.warn("[HyperFrames] Erreur, fallback sur FFmpeg classique:", error);
+        warnings.push("Rendu HyperFrames échoué, utilisation du rendu FFmpeg classique.");
+
+        outcome = await renderWithDrawtext();
       }
     } else {
       // ─── Chemin FFmpeg classique : sous-titres drawtext ──────────────────
-      const subtitleFiles = cues.map((_, i) => `subtitle_${i}.txt`);
-
-      for (let i = 0; i < subtitleFiles.length; i++) {
-        const raw = preset.uppercase
-          ? cues[i].text.toUpperCase()
-          : cues[i].text;
-        const text = wrapLines(
-          raw,
-          preset.maxCharsPerLine,
-          preset.maxLines
-        ).join("\n");
-        cleanupNames.add(subtitleFiles[i]);
-        await ff.writeFile(
-          subtitleFiles[i],
-          new TextEncoder().encode(text)
-        );
-      }
-
-      progress("compose", "Chargement de la police…");
-      cleanupNames.add("font.ttf");
-      await writeFileSafe(
-        ff,
-        "font.ttf",
-        await loadFont(signal, targetLanguage.code)
-      );
-
-      outcome = await renderWithFallback(
-        ff,
-        buildGraphInputs(
-          cues,
-          preset,
-          coverMask,
-          subYAnchor,
-          activeMasks,
-          keeps,
-          hasAudio,
-          voiceWav,
-          opts,
-          transition,
-          transitionSeconds,
-          cutDurations,
-          videoWidth,
-          videoHeight,
-          sourceFps
-        ),
-        {
-          inputName,
-          voiceFile: voiceWav ? "voice.wav" : null,
-          outputName: "output.mp4",
-          onProgress: (note) => progress("compose", note),
-          signal,
-        }
-      );
+      outcome = await renderWithDrawtext();
     }
 
     if (outcome.degradations.length) {
       warnings.push(
-        `Rendu simplifié : ${outcome.degradations.join(", ")} non appliqué${outcome.degradations.length > 1 ? "s" : ""}.`
+        `Rendu simplifié : ${outcome.degradations.join(", ")} non appliqué${outcome.degradations.length > 1 ? "s" : ""}.`,
       );
     }
 
     return {
-      videoBlob: new Blob(
-        [exactArrayBuffer(outcome.bytes)],
-        { type: "video/mp4" }
-      ),
+      videoBlob: new Blob([exactArrayBuffer(outcome.bytes)], { type: "video/mp4" }),
       segments,
       warnings,
     };
@@ -580,50 +406,4 @@ export async function runPipeline(
       }
     }
   }
-}
-
-/**
- * Helper pour construire les GraphInputs
- */
-function buildGraphInputs(
-  cues: any[],
-  preset: any,
-  coverMask: any,
-  subYAnchor: number,
-  activeMasks: any[],
-  keeps: any[],
-  hasAudio: boolean,
-  voiceWav: any,
-  opts: any,
-  transition: string,
-  transitionSeconds: number,
-  cutDurations: number[],
-  videoWidth: number,
-  videoHeight: number,
-  sourceFps: number
-): GraphInputs {
-  const subtitleFiles = cues.map((_: any, i: number) => `subtitle_${i}.txt`);
-
-  return {
-    cues,
-    subtitleFiles,
-    preset,
-    coverMask,
-    subYAnchor,
-    activeMasks,
-    keeps,
-    hasAudio,
-    hasVoice: Boolean(voiceWav),
-    mirror: opts?.mirror === true,
-    ambienceLevel: opts?.ambienceLevel,
-    maskStrength: opts?.maskStrength,
-    remap: (t: number) => remapTimeWithTransitions(t, keeps, cutDurations),
-    filterId: opts?.filterId,
-    upscale: opts?.upscale ?? "none",
-    videoWidth,
-    videoHeight,
-    fps: sourceFps,
-    transition: transition as any,
-    transitionDuration: transitionSeconds,
-  };
 }

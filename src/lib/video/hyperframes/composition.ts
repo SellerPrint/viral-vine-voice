@@ -98,13 +98,16 @@ export function cuesToSubtitleElements(cues: Cue[]): SubtitleElement[] {
     start: cue.start,
     end: cue.end,
     // Split text into words with proportional timing
-    words: cue.text.split(/\s+/).filter(Boolean).map((word, wordIndex, arr) => {
-      const totalWords = arr.length;
-      const span = cue.end - cue.start;
-      const wordStart = cue.start + (wordIndex / totalWords) * span;
-      const wordEnd = cue.start + ((wordIndex + 1) / totalWords) * span;
-      return { text: word, start: wordStart, end: wordEnd };
-    }),
+    words: cue.text
+      .split(/\s+/)
+      .filter(Boolean)
+      .map((word, wordIndex, arr) => {
+        const totalWords = arr.length;
+        const span = cue.end - cue.start;
+        const wordStart = cue.start + (wordIndex / totalWords) * span;
+        const wordEnd = cue.start + ((wordIndex + 1) / totalWords) * span;
+        return { text: word, start: wordStart, end: wordEnd };
+      }),
   }));
 }
 
@@ -181,7 +184,7 @@ function generateGSAPScript(
   elements.forEach((el) => {
     el.words.forEach((_, wordIndex) => {
       animations.push(
-        `tl.set("#${el.id}-word-${wordIndex}", { opacity: 0, scale: 0.8 }, ${el.start.toFixed(3)});`
+        `tl.set("#${el.id}-word-${wordIndex}", { opacity: 0, scale: 0.8 }, ${el.start.toFixed(3)});`,
       );
     });
   });
@@ -194,19 +197,19 @@ function generateGSAPScript(
         const animClass = preset.entrance;
 
         animations.push(
-          `tl.to("#${el.id}-word-${wordIndex}", { opacity: 1, scale: 1, duration: 0.2, ease: "back.out(1.7)", onStart: function() { document.getElementById("${el.id}-word-${wordIndex}").classList.add("${animClass}"); } }, ${(el.start + delay).toFixed(3)});`
+          `tl.to("#${el.id}-word-${wordIndex}", { opacity: 1, scale: 1, duration: 0.2, ease: "back.out(1.7)", onStart: function() { document.getElementById("${el.id}-word-${wordIndex}").classList.add("${animClass}"); } }, ${(el.start + delay).toFixed(3)});`,
         );
       });
     } else {
       // Animation du bloc entier
       animations.push(
-        `tl.to("#${el.id}", { opacity: 1, scale: 1, duration: 0.3, ease: "power2.out" }, ${el.start.toFixed(3)});`
+        `tl.to("#${el.id}", { opacity: 1, scale: 1, duration: 0.3, ease: "power2.out" }, ${el.start.toFixed(3)});`,
       );
     }
 
     // Fin : masquer le sous-titre
     animations.push(
-      `tl.to("#${el.id}", { opacity: 0, duration: 0.15 }, ${(el.end - 0.15).toFixed(3)});`
+      `tl.to("#${el.id}", { opacity: 0, duration: 0.15 }, ${(el.end - 0.15).toFixed(3)});`,
     );
   });
 
@@ -243,8 +246,7 @@ export function generateHyperFramesComposition(
       if (preset.wordByWord) {
         const wordsHTML = el.words
           .map(
-            (word, i) =>
-              `<span id="${el.id}-word-${i}" class="subtitle-word">${word.text}</span>`
+            (word, i) => `<span id="${el.id}-word-${i}" class="subtitle-word">${word.text}</span>`,
           )
           .join(" ");
 
@@ -329,7 +331,7 @@ export function generateCSSOnlyComposition(
       const wordsHTML = el.words
         .map(
           (word, i) =>
-            `<span class="subtitle-word" style="animation-delay: ${i * 0.08}s;">${word.text}</span>`
+            `<span class="subtitle-word" style="animation-delay: ${i * 0.08}s;">${word.text}</span>`,
         )
         .join(" ");
 

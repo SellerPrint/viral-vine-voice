@@ -6,10 +6,8 @@
  */
 
 import { runPipeline } from "../pipeline";
-import {
-  HYPERFRAMES_PRESETS,
-  type HyperFramesPreset,
-} from "./composition";
+import type { Cue } from "../subtitles/cues";
+import { generateHyperFramesComposition, HYPERFRAMES_PRESETS } from "./composition";
 
 // ─── Exemple 1 : Pipeline avec HyperFrames (défaut) ─────────────────────
 
@@ -29,12 +27,9 @@ export async function exampleWithHyperFrames() {
   const bytes = new Uint8Array(await file.arrayBuffer());
 
   // HyperFrames est activé par défaut
-  const result = await runPipeline(
-    { name: file.name, bytes },
-    (step, detail, pct) => {
-      console.log(`[${step}] ${detail ?? ""} ${pct ? `${Math.round(pct * 100)}%` : ""}`);
-    }
-  );
+  const result = await runPipeline({ name: file.name, bytes }, (step, detail, pct) => {
+    console.log(`[${step}] ${detail ?? ""} ${pct ? `${Math.round(pct * 100)}%` : ""}`);
+  });
 
   // Télécharger la vidéo
   const url = URL.createObjectURL(result.videoBlob);
@@ -72,32 +67,17 @@ export function exampleListPresets() {
  * Utile pour prévisualiser les sous-titres dans un iframe.
  */
 export function exampleGenerateComposition() {
-  // Import dynamique pour éviter les erreurs de type
-  const composition = require("./composition");
-
   // Cues de test
-  const testCues = [
-    {
-      text: "HELLO WORLD",
-      start: 0.5,
-      end: 2.0,
-    },
-    {
-      text: "BIENVENUE SUR VIRALDUB",
-      start: 2.5,
-      end: 4.5,
-    },
+  const testCues: Cue[] = [
+    { text: "HELLO WORLD", start: 0.5, end: 2.0 },
+    { text: "BIENVENUE SUR VIRALDUB", start: 2.5, end: 4.5 },
   ];
 
   // Générer la composition avec le preset TikTok Pop
-  const html = composition.generateHyperFramesComposition(
-    testCues,
-    HYPERFRAMES_PRESETS[0],
-    {
-      width: 1080,
-      height: 1920,
-    }
-  );
+  const html = generateHyperFramesComposition(testCues, HYPERFRAMES_PRESETS[0], {
+    width: 1080,
+    height: 1920,
+  });
 
   // Afficher dans un iframe
   const iframe = document.createElement("iframe");

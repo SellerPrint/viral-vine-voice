@@ -46,51 +46,20 @@ export type RenderResult = {
 };
 
 /**
- * Génère un fichier HTML temporaire pour le rendu HyperFrames
- */
-async function writeCompositionToTempFile(
-  html: string,
-  compositionId: string,
-): Promise<string> {
-  // En environnement Cloudflare Workers, on utilise les KV ou R2
-  // En local, on écrit dans /tmp
-  const isWorker = typeof globalThis.caches !== "undefined";
-
-  if (isWorker) {
-    // En Workers, on retourne l'HTML directement pour un rendu client-side
-    return html;
-  }
-
-  // En local, on écrit dans /tmp
-  const fs = await import("fs/promises");
-  const path = await import("path");
-  const tmpDir = path.join(process.cwd(), ".tmp", "hyperframes");
-  await fs.mkdir(tmpDir, { recursive: true });
-
-  const filePath = path.join(tmpDir, `${compositionId}.html`);
-  await fs.writeFile(filePath, html, "utf-8");
-
-  return filePath;
-}
-
-/**
  * Rend une composition HyperFrames en vidéo via le producer
  *
- * Cette fonction est conçue pour être appelée côté serveur.
- * Elle nécessite que @hyperframes/producer soit installé.
+ * Actuellement en rendu client-side : la composition HTML est retournée
+ * telle quelle et peut être chargée dans un iframe pour prévisualisation.
+ *
+ * Le rendu serveur haute qualité nécessiterait @hyperframes/producer
+ * (Puppeteer + FFmpeg natif) : l'installer, puis brancher ici la capture
+ * frame par frame de la composition.
  */
 export async function renderSubtitlesWithHyperFrames(
   cues: Cue[],
   options: RenderOptions = {},
 ): Promise<RenderResult> {
-  const {
-    preset = HYPERFRAMES_PRESETS[0],
-    width = 1080,
-    height = 1920,
-    fps = 30,
-    quality = "high",
-    transparent = true,
-  } = options;
+  const { preset = HYPERFRAMES_PRESETS[0], width = 1080, height = 1920 } = options;
 
   // Générer la composition HTML
   const compositionId = `viraldub-subtitles-${Date.now()}`;
@@ -101,24 +70,14 @@ export async function renderSubtitlesWithHyperFrames(
   });
 
   // Calculer la durée
-  const duration =
-    cues.length > 0 ? Math.max(...cues.map((c) => c.end)) : 1;
-
-  // Options de rendu selon la qualité
-  const qualitySettings = {
-    low: { crf: 28, preset: "ultrafast" as const },
-    medium: { crf: 26, preset: "veryfast" as const },
-    high: { crf: 23, preset: "medium" as const },
-  };
-
-  const { crf, preset: ffPreset } = qualitySettings[quality];
+  const duration = cues.length > 0 ? Math.max(...cues.map((c) => c.end)) : 1;
 
   // Le producer n'est pas encore installé - fallback sur rendu client-side
   // Pour activer le rendu serveur, installer @hyperframes/producer :
   // bun add @hyperframes/producer
   console.info(
     "[HyperFrames] Rendu client-side (producer non installé).",
-    "Pour le rendu serveur haute qualité, installez @hyperframes/producer."
+    "Pour le rendu serveur haute qualité, installez @hyperframes/producer.",
   );
 
   return {
@@ -127,10 +86,7 @@ export async function renderSubtitlesWithHyperFrames(
     duration,
     metadata: {
       preset: preset.id,
-      wordCount: cues.reduce(
-        (acc, cue) => acc + (cue.text.split(/\s+/).length || 1),
-        0,
-      ),
+      wordCount: cues.reduce((acc, cue) => acc + (cue.text.split(/\s+/).length || 1), 0),
       compositionId,
     },
   };
@@ -140,15 +96,8 @@ export async function renderSubtitlesWithHyperFrames(
  * Version simplifiée pour le rendu client-side
  * Génère un blob HTML qui peut être chargé dans un iframe
  */
-export function renderSubtitlesClientSide(
-  cues: Cue[],
-  options: RenderOptions = {},
-): RenderResult {
-  const {
-    preset = HYPERFRAMES_PRESETS[0],
-    width = 1080,
-    height = 1920,
-  } = options;
+export function renderSubtitlesClientSide(cues: Cue[], options: RenderOptions = {}): RenderResult {
+  const { preset = HYPERFRAMES_PRESETS[0], width = 1080, height = 1920 } = options;
 
   const compositionId = `viraldub-subtitles-${Date.now()}`;
   const compositionHTML = generateHyperFramesComposition(cues, preset, {
@@ -157,8 +106,7 @@ export function renderSubtitlesClientSide(
     compositionId,
   });
 
-  const duration =
-    cues.length > 0 ? Math.max(...cues.map((c) => c.end)) : 1;
+  const duration = cues.length > 0 ? Math.max(...cues.map((c) => c.end)) : 1;
 
   return {
     videoBlob: new Blob([compositionHTML], { type: "text/html" }),
@@ -166,10 +114,7 @@ export function renderSubtitlesClientSide(
     duration,
     metadata: {
       preset: preset.id,
-      wordCount: cues.reduce(
-        (acc, cue) => acc + (cue.text.split(/\s+/).length || 1),
-        0,
-      ),
+      wordCount: cues.reduce((acc, cue) => acc + (cue.text.split(/\s+/).length || 1), 0),
       compositionId,
     },
   };
@@ -179,19 +124,14 @@ export function renderSubtitlesClientSide(
  * Intègre les sous-titres HyperFrames dans une vidéo existante
  *
  * Cette fonction overlay le rendu des sous-titres sur la vidéo source
- * en utilisant ffmpeg.wasm ou le producer HyperFrames.
+ * en utilisant ffmpeg.wasm. Si le rendu des sous-titres ne produit pas de
+ * vidéo (mode client-side), la vidéo originale est retournée inchangée.
  */
 export async function overlaySubtitlesOnVideo(
   originalVideoBlob: Blob,
   subtitleCues: Cue[],
   options: RenderOptions = {},
 ): Promise<Blob> {
-  const {
-    preset = HYPERFRAMES_PRESETS[0],
-    width = 1080,
-    height = 1920,
-  } = options;
-
   // 1. Rendre les sous-titres en vidéo séparée
   const subtitleResult = await renderSubtitlesWithHyperFrames(subtitleCues, {
     ...options,
@@ -211,18 +151,14 @@ export async function overlaySubtitlesOnVideo(
       cleanupNames.add("subtitles.webm");
       cleanupNames.add("output.mp4");
 
-      await writeFileSafe(
-        ff,
-        "input.mp4",
-        new Uint8Array(await originalVideoBlob.arrayBuffer())
-      );
+      await writeFileSafe(ff, "input.mp4", new Uint8Array(await originalVideoBlob.arrayBuffer()));
 
       // Si on a une vidéo de sous-titres, l'overlay
       if (subtitleResult.videoBlob.type.startsWith("video/")) {
         await writeFileSafe(
           ff,
           "subtitles.webm",
-          new Uint8Array(await subtitleResult.videoBlob.arrayBuffer())
+          new Uint8Array(await subtitleResult.videoBlob.arrayBuffer()),
         );
 
         // Overlay des sous-titres sur la vidéo originale
@@ -258,7 +194,7 @@ export async function overlaySubtitlesOnVideo(
       if (outputBytes instanceof Uint8Array) {
         const arrayBuffer = outputBytes.buffer.slice(
           outputBytes.byteOffset,
-          outputBytes.byteOffset + outputBytes.byteLength
+          outputBytes.byteOffset + outputBytes.byteLength,
         ) as ArrayBuffer;
         return new Blob([arrayBuffer], { type: "video/mp4" });
       }
