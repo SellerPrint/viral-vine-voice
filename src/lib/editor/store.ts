@@ -91,6 +91,14 @@ export type UiState = {
   leftPanel: boolean;
   rightPanel: boolean;
   /**
+   * Hauteur de la timeline, en pixels ; `null` = laissée à l'adaptation CSS.
+   *
+   * Un monteur vertical est à l'étroit en hauteur, et le seul partageur de
+   * cette hauteur est la timeline. La régler à la souris, c'est régler
+   * directement la taille de l'aperçu — aucun bouton de zoom n'y parvient.
+   */
+  timelineHeight: number | null;
+  /**
    * Le plan 9:16 est bridé en hauteur, pas en largeur : replier les volets latéraux
    * ne le grandit donc presque rien. C'est la hauteur de la timeline qu'il faut
    * lui rendre quand on veut regarder le montage au lieu de le corriger.
@@ -126,6 +134,7 @@ export const INITIAL_UI: UiState = {
   uiScale: "confort",
   leftPanel: true,
   rightPanel: true,
+  timelineHeight: null,
   timelineOpen: true,
 };
 

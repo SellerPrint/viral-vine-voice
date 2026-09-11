@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 
 import { buildThumbs, releaseThumbs, type Thumb } from "@/lib/editor/thumbs";
 import { decodeMediaPeaks, peaksForRanges } from "@/lib/editor/waveform";
@@ -148,8 +155,54 @@ export function Timeline() {
 
   const dragged = drag ? project.clips.find((clip) => clip.id === drag.id) : undefined;
 
+  /**
+   * La hauteur de la timeline se tire par son bord supérieur. Ce n'est pas un
+   * réglage de confort : sur un plan 9:16, l'aperçu est contraint en hauteur,
+   * donc chaque pixel rendu à la scène est un pixel de plus sur l'image.
+   */
+  const resizeFrom = useRef<{ y: number; height: number } | null>(null);
+
+  const beginResize = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const box = event.currentTarget.parentElement?.getBoundingClientRect();
+    if (!box) return;
+    event.preventDefault();
+    resizeFrom.current = { y: event.clientY, height: box.height };
+
+    const onMove = (move: PointerEvent) => {
+      const origin = resizeFrom.current;
+      if (!origin) return;
+      // Vers le haut = plus de place pour le plan. Et le plan en garde toujours
+      // de quoi rester lisible : on ne laisse pas la timeline l'écraser.
+      const wanted = origin.height - (move.clientY - origin.y);
+      const max = Math.max(140, window.innerHeight - 250);
+      dispatch({
+        type: "ui",
+        patch: { timelineHeight: Math.round(Math.max(96, Math.min(max, wanted))) },
+      });
+    };
+    const onUp = () => {
+      resizeFrom.current = null;
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  };
+
   return (
-    <div className="ed-timeline">
+    <div
+      className="ed-timeline"
+      style={ui.timelineHeight ? { height: ui.timelineHeight } : undefined}
+    >
+      <div
+        className="ed-tl-resize"
+        role="separator"
+        aria-orientation="horizontal"
+        title="Tirer pour régler la hauteur de la timeline — double-clic pour revenir à l'automatique"
+        onPointerDown={beginResize}
+        onDoubleClick={() => dispatch({ type: "ui", patch: { timelineHeight: null } })}
+      />
+
       {/* ------------------------------- outils ------------------------------- */}
       <div className="ed-tl-toolbar">
         <IconButton

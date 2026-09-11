@@ -84,7 +84,31 @@ export function Editor() {
   );
 }
 
-const UI_SCALE_KEY = "viraldub.ui-scale";
+/**
+ * Préférences d'affichage : densité et hauteur de timeline. Elles ne portent
+ * que sur l'atelier, jamais sur le montage — elles ne passent donc ni par
+ * l'historique ni par l'export du plan.
+ */
+const UI_KEY = "viraldub.ui";
+const LEGACY_SCALE_KEY = "viraldub.ui-scale";
+
+type UiPrefs = { scale?: "compact" | "confort" | "large"; timelineHeight?: number | null };
+
+function readUiPrefs(): UiPrefs {
+  try {
+    const raw = window.localStorage.getItem(UI_KEY);
+    if (raw) return JSON.parse(raw) as UiPrefs;
+    // Première ouverture depuis que les deux réglages partagent une clé : on
+    // reprend la densité déjà enregistrée au lieu de la faire perdre.
+    const legacy = window.localStorage.getItem(LEGACY_SCALE_KEY);
+    if (legacy === "compact" || legacy === "confort" || legacy === "large") {
+      return { scale: legacy };
+    }
+  } catch {
+    /* stockage plein ou désactivé : l'atelier démarre simplement par défaut */
+  }
+  return {};
+}
 
 function EditorFrame() {
   const { project, ui, dispatch } = useEditor();
@@ -102,17 +126,32 @@ function EditorFrame() {
   // La densité choisie survit au rechargement. Lecture après montage, jamais
   // pendant : au rendu côté serveur, `localStorage` n'existe pas et une valeur
   // lue ici ferait désacorder l'HTML serveur du premier rendu client.
+  const prefs = useRef<UiPrefs | null>(null);
   useEffect(() => {
-    const saved = window.localStorage.getItem(UI_SCALE_KEY);
-    if (saved === "compact" || saved === "confort" || saved === "large") {
-      if (saved !== ui.uiScale) dispatch({ type: "ui", patch: { uiScale: saved } });
+    const saved = readUiPrefs();
+    prefs.current = saved;
+    const patch: Record<string, unknown> = {};
+    if (saved.scale && saved.scale !== ui.uiScale) patch.uiScale = saved.scale;
+    if (typeof saved.timelineHeight === "number" && saved.timelineHeight !== ui.timelineHeight) {
+      patch.timelineHeight = saved.timelineHeight;
     }
+    if (Object.keys(patch).length) dispatch({ type: "ui", patch });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
-    window.localStorage.setItem(UI_SCALE_KEY, ui.uiScale);
-  }, [ui.uiScale]);
+    // Rien à écrire tant que la valeur lue n'a pas été reprise : sinon le
+    // premier montage écraserait la préférence par les valeurs par défaut.
+    if (!prefs.current) return;
+    try {
+      window.localStorage.setItem(
+        UI_KEY,
+        JSON.stringify({ scale: ui.uiScale, timelineHeight: ui.timelineHeight } satisfies UiPrefs),
+      );
+    } catch {
+      /* stockage indisponible (navigation privée, quota) : non bloquant */
+    }
+  }, [ui.uiScale, ui.timelineHeight]);
 
   useEditorKeyboard();
 

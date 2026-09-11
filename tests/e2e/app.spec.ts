@@ -262,6 +262,10 @@ test("la timeline se manipule : sélection, déplacement, annulation", async ({ 
   await expect(blocks).toHaveCount(6, { timeout: 20_000 });
 
   const block = blocks.first();
+  // Le bloc doit être dans la partie visible de la timeline avant qu'une
+  // souris ne vienne le saisir : hors du cadre, `mouse.down` n'appuie sur
+  // rien et le geste n'échoue pas — il ne fait tout simplement rien.
+  await block.scrollIntoViewIfNeeded();
   const before = await block.boundingBox();
   await expect(before).not.toBeNull();
 
@@ -597,4 +601,50 @@ test("la densité de l'interface se règle, se retient, et F rend le plan lisibl
   await page.keyboard.press("f");
   await page.waitForTimeout(300);
   await expect(page.locator(".ed-timeline")).toBeVisible();
+});
+
+test("la hauteur de la timeline se tire par son bord et rend de la place au plan", async ({
+  page,
+}) => {
+  await openDemoWithMasks(page);
+
+  // Sur un plan vertical, l'aperçu est contraint en hauteur : le seul moyen de
+  // l'agrandir vraiment est de disputer de la hauteur à la timeline. C'est ce
+  // que fait le bord de reprise, et c'est ce que ce cas mesure — en pixels de
+  // plan gagnés, pas en présence d'un élément de plus.
+  const mesures = () =>
+    page.evaluate(() => ({
+      timeline: Math.round(
+        document.querySelector(".ed-timeline")?.getBoundingClientRect().height ?? 0,
+      ),
+      plan: Math.round(document.querySelector(".ed-frame")?.getBoundingClientRect().height ?? 0),
+    }));
+
+  const avant = await mesures();
+  expect(avant.timeline).toBeGreaterThan(150);
+
+  const poignee = await page.locator(".ed-tl-resize").boundingBox();
+  expect(poignee).toBeTruthy();
+  // Vers le bas : la timeline se replie et rend sa hauteur au plan.
+  await page.mouse.move(poignee!.x + poignee!.width / 2, poignee!.y + 5);
+  await page.mouse.down();
+  await page.mouse.move(poignee!.x + poignee!.width / 2, poignee!.y + 5 + 90, { steps: 12 });
+  await page.mouse.up();
+  await page.waitForTimeout(300);
+
+  const serre = await mesures();
+  expect(avant.timeline - serre.timeline).toBeGreaterThan(70);
+  expect(serre.plan - avant.plan).toBeGreaterThan(50);
+
+  // Réglage durable, puis retour à l'automatique par double-clic.
+  await page.reload({ waitUntil: "networkidle" });
+  await expectHydrated(page);
+  await expect
+    .poll(async () => (await mesures()).timeline, { timeout: 15_000 })
+    .toBeLessThan(avant.timeline - 50);
+
+  await page.locator(".ed-tl-resize").dblclick();
+  await page.waitForTimeout(300);
+  const apresDoubleClic = await mesures();
+  expect(apresDoubleClic.timeline).toBeGreaterThan(serre.timeline + 20);
 });

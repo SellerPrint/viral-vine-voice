@@ -778,6 +778,37 @@ input[type="range"].ed-slider::-moz-range-thumb {
   border-bottom: 1px solid var(--ed-line);
   background: var(--ed-surface);
 }
+/* Bord de reprise : la timeline se règle à la souris, comme dans un logiciel de
+   montage. La poignée est posée à cheval sur la ligne de séparation — viser un
+   pixel de bord ne doit pas être une condition pour gagner de la place. */
+.ed-timeline {
+  position: relative;
+}
+.ed-tl-resize {
+  position: absolute;
+  top: -5px;
+  left: 0;
+  right: 0;
+  height: 11px;
+  z-index: 6;
+  cursor: ns-resize;
+}
+.ed-tl-resize::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 4px;
+  width: 54px;
+  height: 3px;
+  margin-left: -27px;
+  border-radius: 99px;
+  background: rgba(255, 255, 255, 0.16);
+  transition: background 120ms ease;
+}
+.ed-tl-resize:hover::after,
+.ed-tl-resize:active::after {
+  background: var(--ed-select);
+}
 .ed-tl-body {
   display: grid;
   /* La colonne des têtes suit la densité : à 156 px fixes, « Textes » et
@@ -1360,8 +1391,10 @@ input[type="range"].ed-slider::-moz-range-thumb {
   --ed-handle: calc(15px * var(--ed-ui));
   --ed-hit: calc(9px * var(--ed-ui));
   /* Les pistes gagnent 15 % hors mise à l'échelle : un bloc de sous-titre doit
-     se saisir sans viser une ligne de 3 px au pixel près. */
-  --ed-lane-h: calc(var(--ed-lane-base, 40px) * var(--ed-ui) * 1.15);
+     se saisir sans viser une ligne de 3 px au pixel près. Sur un écran court,
+     cet excédent est le premier à faire défaut — voir la media query plus bas. */
+  --ed-lane-extra: 1.15;
+  --ed-lane-h: calc(var(--ed-lane-base, 40px) * var(--ed-ui) * var(--ed-lane-extra));
   font-size: var(--ed-fs);
   grid-template-rows: var(--ed-topbar-h) minmax(0, 1fr) auto;
 }
@@ -1394,6 +1427,23 @@ input[type="range"].ed-slider::-moz-range-thumb {
 /* Timeline repliée : il ne reste que la barre d'outils, et le plan récupère
    les ~300 px. Les pistes sont masquées, pas démontées — les repères de
    défilement synchrone et les largeurs mesurées restent valides. */
+/* Écran court (720 px et moins, portable sous Windows à 100 %) : sur un plan
+   9:16 c'est la hauteur qui manque au montage, pas la largeur. Trois retraits,
+   dans l'ordre du moins utile au plus utile : le gras des pistes, la marge de
+   la scène, puis une part de la timeline — bornée à 30 % pour que la piste de
+   texte reste entièrement visible, ce qui serait perdu avec un rognage plus
+   agressif. Et le bord de reprise permet de trancher soi-même. */
+@media (max-height: 760px) {
+  .ed-root:not([data-timeline="closed"]) {
+    --ed-lane-extra: 1;
+  }
+  .ed-root:not([data-timeline="closed"]) .ed-timeline {
+    height: clamp(196px, 30vh, 268px);
+  }
+  .ed-stage-canvas {
+    padding: calc(8px * var(--ed-ui));
+  }
+}
 .ed-root[data-timeline="closed"] .ed-tl-body,
 .ed-root[data-timeline="closed"] .ed-timeline {
   height: auto;
