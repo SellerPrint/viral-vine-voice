@@ -1464,6 +1464,54 @@ input[type="range"].ed-slider::-moz-range-thumb {
 .ed-topbar .ed-seg {
   flex: none;
 }
+/* Bandeau de dépôt : le geste est accepté sur toute la fenêtre, il doit se
+   voir avant le lâcher. `pointer-events: none` — le curseur doit rester sur la
+   cible réelle, sinon l'overlay avalerait le dépôt. */
+.ed-drop-overlay {
+  position: fixed;
+  inset: 10px;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  border: 2px dashed var(--ed-select);
+  border-radius: 14px;
+  background: rgba(79, 141, 255, 0.08);
+  pointer-events: none;
+}
+/* Sur une fenêtre étroite, la barre du haut se tient : le bouton garde son
+   icône et son infobulle, l'étiquette s'efface. */
+@media (max-width: 1180px) {
+  .ed-topbar .ed-btn-label {
+    display: none;
+  }
+}
+.ed-drop-badge {
+  padding: calc(9px * var(--ed-ui)) calc(16px * var(--ed-ui));
+  border-radius: 99px;
+  background: var(--ed-select);
+  color: #06131f;
+  font-size: var(--ed-fs);
+  font-weight: 600;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+}
+/* Marée de sélection : la plage encadrée à la souris sur les pistes. */
+.ed-selection-note {
+  margin: 0;
+  padding: calc(6px * var(--ed-ui)) calc(12px * var(--ed-ui));
+  border-bottom: 1px solid var(--ed-line);
+  background: rgba(79, 141, 255, 0.1);
+  color: var(--ed-select);
+}
+.ed-marquee {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 5;
+  background: rgba(79, 141, 255, 0.16);
+  border-left: 1px solid var(--ed-select);
+  border-right: 1px solid var(--ed-select);
+  pointer-events: none;
+}
 .ed-seg {
   display: inline-flex;
   border: 1px solid var(--ed-line);

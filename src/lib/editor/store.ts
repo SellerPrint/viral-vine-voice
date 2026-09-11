@@ -9,7 +9,7 @@ import {
   splitRange,
   type Range,
 } from "./edl";
-import { clipRange, clipsOn, cutRanges, makeClip } from "./project";
+import { clampZone, clipRange, clipsOn, cutRanges, makeClip, projectPreset } from "./project";
 import {
   canRedo,
   canUndo,
@@ -48,8 +48,17 @@ export type PanelTab =
 
 export type InspectorTab = "clip" | "style" | "audio" | "project";
 
+/**
+ * Sélection de l'atelier.
+ *
+ * `ids` est une liste, et non un id unique : la sélection multiple est ce qui
+ * permet d'aligner six sous-titres d'un geste ou d'éteindre trois logos à la
+ * fois. Le **premier** élément est la sélection principale — c'est elle que
+ * l'inspecteur détaille et que les repères suivent, pour que la règle « ce que
+ * je vois à droite est ce que je suis en train de tenir » ne bouge pas.
+ */
 export type Selection =
-  { kind: "clip"; id: string } | { kind: "mask"; id: string } | { kind: "source" } | null;
+  { kind: "clip"; ids: string[] } | { kind: "mask"; ids: string[] } | { kind: "source" } | null;
 
 export type Notice = { kind: "info" | "warn" | "error" | "ok"; text: string } | null;
 
@@ -155,6 +164,12 @@ export type Action =
        * à trois fois la distance parcourue par la souris.
        */
       origin: Range;
+      /**
+       * Blocs entraînés, avec leur position AU DÉBUT du geste. L'écart s'applique
+       * à ces origines et jamais aux positions courantes : additionné à chaque
+       * événement de souris, il ferait courir le groupe de plus en plus vite.
+       */
+      groupe?: { id: string; start: number }[];
     }
   | { type: "splitAtPlayhead" }
   | { type: "deleteSelection" }
@@ -167,6 +182,7 @@ export type Action =
   | { type: "seek"; time: number }
   | { type: "ui"; patch: Partial<UiState> }
   | { type: "select"; selection: Selection }
+  | { type: "toggleSelect"; kind: "clip" | "mask"; id: string }
   | { type: "seal" }
   | { type: "undo" }
   | { type: "redo" }
@@ -202,11 +218,41 @@ export function derive(state: EditorState): Derived {
 }
 
 export function selectedClipId(selection: Selection): string | null {
-  return selection?.kind === "clip" ? selection.id : null;
+  return selection?.kind === "clip" ? (selection.ids[0] ?? null) : null;
 }
 
 export function selectedMaskId(selection: Selection): string | null {
-  return selection?.kind === "mask" ? selection.id : null;
+  return selection?.kind === "mask" ? (selection.ids[0] ?? null) : null;
+}
+
+/** Tous les ids sélectionnés, quel que soit le type de cible. */
+export function selectedIds(selection: Selection): string[] {
+  if (!selection || selection.kind === "source") return [];
+  return selection.ids;
+}
+
+export function isSelected(selection: Selection, kind: "clip" | "mask", id: string): boolean {
+  return selection?.kind === kind && selection.ids.includes(id);
+}
+
+/** Sélection simple d'une cible. */
+export function onlySelection(kind: "clip" | "mask", id: string): Selection {
+  return { kind, ids: [id] };
+}
+
+/**
+ * Maj ou Ctrl-clic : ajoute la cible si elle y est déjà pas, la retire sinon.
+ *
+ * Deux règles tiennent ici : on ne change pas de nature en route (une
+ * sélection de blocs de texte reste une sélection de blocs, sinon l'inspecteur
+ * afficherait un panneau sans rapport avec ce qui est tenu), et une
+ * sélection qui se vide redevient `null` — il n'y a pas de « zéro bloc
+ * sélectionné » à afficher.
+ */
+export function toggledSelection(current: Selection, kind: "clip" | "mask", id: string): Selection {
+  if (current?.kind !== kind) return onlySelection(kind, id);
+  const ids = current.ids.includes(id) ? current.ids.filter((x) => x !== id) : [...current.ids, id];
+  return ids.length === 0 ? null : { kind, ids };
 }
 
 /* -------------------------------------------------------------------------- */
@@ -271,6 +317,48 @@ function push(state: EditorState, project: Project, mergeKey?: string): EditorSt
   return hist === state.hist ? state : { ...state, hist };
 }
 
+/**
+ * Le bandeau « Sous-titres FR (bas) » et l'ancre verticale de la légende sont
+ * un seul réglage vu de deux endroits.
+ *
+ * Sans ce lien, le geste le plus naturel de l'atelier était cassé : on tirait
+ * le cadre à l'écran, la zone de flou suivait, mais le texte incrusté restait
+ * cloué à son ancre — le cadre mentait sur le montage. Le mouvement est repris
+ * en écart (*delta*), pas en valeur absolue : l'ancre garde sa propre échelle,
+ * et les deux restent conformes à ce que le moteur calcule au rendu.
+ *
+ * Quand les deux bougent dans le même patch (un plan importé, un préréglage
+ * appliqué), on ne force rien : c'est l'état choisi qui prime.
+ */
+export const ZONE_SOUS_TITRES = "bottom";
+
+function coupleZoneEtAncre(avant: Project, apres: Project): Project {
+  if (avant.masks === apres.masks && avant.overrides === apres.overrides) return apres;
+
+  const bandeAvant = avant.masks.find((m) => m.id === ZONE_SOUS_TITRES);
+  const bandeApres = apres.masks.find((m) => m.id === ZONE_SOUS_TITRES);
+  const ancreAvant = projectPreset(avant).yAnchor;
+  const ancreApres = projectPreset(apres).yAnchor;
+
+  const bouge =
+    bandeAvant && bandeApres && bandeAvant.y !== bandeApres.y ? bandeApres.y - bandeAvant.y : null;
+  const ancreBougee = ancreAvant !== ancreApres;
+
+  if (bouge !== null && !ancreBougee) {
+    const y = round3(clamp(ancreApres + bouge, 0, 0.98));
+    if (y === ancreApres) return apres;
+    return { ...apres, overrides: { ...apres.overrides, yAnchor: y } };
+  }
+
+  if (ancreBougee && bouge === null && bandeApres) {
+    const suit = clampZone({ ...bandeApres, y: bandeApres.y + (ancreApres - ancreAvant) });
+    if (suit.y === bandeApres.y) return apres;
+    return { ...apres, masks: apres.masks.map((m) => (m.id === ZONE_SOUS_TITRES ? suit : m)) };
+  }
+
+  return apres;
+}
+
 function withClips(state: EditorState, clips: Clip[], mergeKey?: string): EditorState {
   return push(state, { ...state.hist.present, clips }, mergeKey);
 }
@@ -278,14 +366,18 @@ function withClips(state: EditorState, clips: Clip[], mergeKey?: string): Editor
 export function editorReducer(state: EditorState, action: Action): EditorState {
   switch (action.type) {
     case "patch":
-      return push(state, { ...state.hist.present, ...action.patch }, action.mergeKey);
+      return push(
+        state,
+        coupleZoneEtAncre(state.hist.present, { ...state.hist.present, ...action.patch }),
+        action.mergeKey,
+      );
 
     case "clips": {
       const next = withClips(state, action.clips, action.mergeKey);
       if (action.select === undefined) return next;
       return {
         ...next,
-        selection: action.select === null ? null : { kind: "clip", id: action.select },
+        selection: action.select === null ? null : onlySelection("clip", action.select),
       };
     }
 
@@ -318,13 +410,40 @@ export function editorReducer(state: EditorState, action: Action): EditorState {
         end = round3(Math.max(right, start + MIN_CLIP));
       }
 
-      let clips = project.clips.map((c) =>
+      const groupe =
+        action.mode === "move" && action.groupe && action.groupe.length > 1
+          ? new Map(action.groupe.map((g) => [g.id, g.start]))
+          : null;
+
+      if (groupe?.has(clip.id)) {
+        // Le déplacement du groupe est celui du bloc tenu, une fois l'aimant
+        // appliqué : les autres suivent ce même écart. Pas de `pushApart` ici —
+        // écarter les voisins d'un bloc qu'on déplace à plusieurs serait défaire
+        // le groupement que l'utilisateur vient de faire.
+        // Un seul écart, mesuré sur le bloc tenu depuis son origine de geste ;
+        // les autres le reçoivent identique, chacun depuis la leur.
+        const pas = round3(start - action.origin.start);
+        const clips = project.clips.map((c) => {
+          const base = groupe.get(c.id);
+          if (base === undefined) return c;
+          const max = duration > 0 ? duration - c.duration : Number.POSITIVE_INFINITY;
+          return {
+            ...c,
+            start: round3(clamp(base + pas, bounds.min, Math.max(bounds.min, max))),
+            duration: c.id === clip.id ? round3(end - start) : c.duration,
+          };
+        });
+        return withClips(state, clips, `drag:${clip.id}:${action.mode}`);
+      }
+
+      const clips = project.clips.map((c) =>
         c.id === clip.id ? { ...c, start: round3(start), duration: round3(end - start) } : c,
       );
       // L'insertion pousse les voisins quel que soit l'aimant : deux blocs l'un
       // sur l'autre ne sont pas un choix de montage, c'est une perte de texte.
-      if (clip.track === "subs" && action.mode === "move") clips = pushApart(clips, clip.id);
-      return withClips(state, clips, `drag:${clip.id}:${action.mode}`);
+      const regles =
+        clip.track === "subs" && action.mode === "move" ? pushApart(clips, clip.id) : clips;
+      return withClips(state, regles, `drag:${clip.id}:${action.mode}`);
     }
 
     case "splitAtPlayhead": {
@@ -362,22 +481,24 @@ export function editorReducer(state: EditorState, action: Action): EditorState {
       const clips = [...project.clips.filter((c) => c.id !== target.id), a, b];
       return {
         ...withClips(state, clips),
-        selection: { kind: "clip", id: b.id },
+        selection: onlySelection("clip", b.id),
       };
     }
 
     case "deleteSelection": {
       const project = state.hist.present;
       if (state.selection?.kind === "clip") {
-        const id = state.selection.id;
-        const clips = project.clips.filter((c) => c.id !== id);
+        // Le groupe entier, pas seulement la sélection principale : effacer
+        // six sous-titres doit se faire d'un coup quand ils sont six en main.
+        const ids = new Set(state.selection.ids);
+        const clips = project.clips.filter((c) => !ids.has(c.id));
         return { ...withClips(state, clips), selection: null };
       }
       if (state.selection?.kind === "mask") {
-        const id = state.selection.id;
+        const ids = new Set(state.selection.ids);
         // Éteindre plutôt que supprimer : la zone garde sa place et sa liste
         // reste stable, un faux clic se rattrape d'un clic.
-        const masks = project.masks.map((m) => (m.id === id ? { ...m, enabled: false } : m));
+        const masks = project.masks.map((m) => (ids.has(m.id) ? { ...m, enabled: false } : m));
         return { ...push(state, { ...project, masks }), selection: null };
       }
       return state;
@@ -392,7 +513,7 @@ export function editorReducer(state: EditorState, action: Action): EditorState {
       const clip = makeClip("subs", { start, end }, { text: action.text ?? "Nouveau sous-titre" });
       return {
         ...withClips(state, [...project.clips, clip]),
-        selection: { kind: "clip", id: clip.id },
+        selection: onlySelection("clip", clip.id),
       };
     }
 
@@ -406,18 +527,26 @@ export function editorReducer(state: EditorState, action: Action): EditorState {
       const clip = makeClip("cuts", { start, end }, { reason: "manuel" });
       return {
         ...withClips(state, [...project.clips, clip]),
-        selection: { kind: "clip", id: clip.id },
+        selection: onlySelection("clip", clip.id),
       };
     }
 
     case "setMasks":
-      return push(state, { ...state.hist.present, masks: action.masks }, action.mergeKey);
+      return push(
+        state,
+        coupleZoneEtAncre(state.hist.present, { ...state.hist.present, masks: action.masks }),
+        action.mergeKey,
+      );
 
     case "replaceMask": {
       const masks = state.hist.present.masks.map((m) =>
         m.id === action.id ? { ...m, ...action.patch } : m,
       );
-      return push(state, { ...state.hist.present, masks }, action.mergeKey);
+      return push(
+        state,
+        coupleZoneEtAncre(state.hist.present, { ...state.hist.present, masks }),
+        action.mergeKey,
+      );
     }
 
     case "addMask": {
@@ -433,21 +562,27 @@ export function editorReducer(state: EditorState, action: Action): EditorState {
       };
       return {
         ...push(state, { ...project, masks: [...project.masks, zone] }),
-        selection: { kind: "mask", id: zone.id },
+        selection: onlySelection("mask", zone.id),
       };
     }
 
     case "nudgeSelection": {
       const project = state.hist.present;
-      const id = selectedClipId(state.selection);
-      if (!id) return state;
-      const clip = project.clips.find((c) => c.id === id);
-      if (!clip) return state;
+      const ids = new Set(state.selection?.kind === "clip" ? state.selection.ids : []);
+      if (ids.size === 0) return state;
       const duration = project.source?.duration ?? 0;
-      const max = duration > 0 ? duration - clip.duration : Number.POSITIVE_INFINITY;
-      const start = round3(clamp(clip.start + action.seconds, 0, Math.max(0, max)));
-      let clips = project.clips.map((c) => (c.id === id ? { ...c, start } : c));
-      if (clip.track === "subs") clips = pushApart(clips, id);
+      // Le décalage est commun, puis chaque borne est reprise à sa main : le
+      // groupe avance d'un bloc, sans que le premier buté fasse dérailler les
+      // autres.
+      let clips = project.clips.map((c) => {
+        if (!ids.has(c.id)) return c;
+        const max = duration > 0 ? duration - c.duration : Number.POSITIVE_INFINITY;
+        return { ...c, start: round3(clamp(c.start + action.seconds, 0, Math.max(0, max))) };
+      });
+      if (clips === project.clips) return state;
+      if (project.clips.some((c) => ids.has(c.id) && c.track === "subs")) {
+        clips = pushApart(clips, [...ids][0]);
+      }
       return withClips(state, clips);
     }
 
@@ -466,6 +601,11 @@ export function editorReducer(state: EditorState, action: Action): EditorState {
 
     case "select":
       return { ...state, selection: action.selection };
+
+    case "toggleSelect": {
+      const next = toggledSelection(state.selection, action.kind, action.id);
+      return next === state.selection ? state : { ...state, selection: next };
+    }
 
     case "seal": {
       const hist = sealHistory(state.hist);

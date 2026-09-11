@@ -5,6 +5,7 @@ import { formatClock } from "@/lib/editor/edl";
 import type { MaskZone } from "@/lib/video/presets";
 import { clampZone } from "@/lib/editor/project";
 
+import { isSelected } from "@/lib/editor/store";
 import type { Selection } from "@/lib/editor/store";
 
 import { Icon, IconButton } from "./ui";
@@ -35,6 +36,8 @@ type DragState = {
   startY: number;
   boxW: number;
   boxH: number;
+  /** Zones entraînées par le geste, saisies à leur position de départ. */
+  groupe?: { id: string; x: number; y: number }[];
 } | null;
 
 export function PreviewStage() {
@@ -135,6 +138,30 @@ export function PreviewStage() {
       const element = overlayRef.current;
       if (!element) return;
       (event.target as Element).setPointerCapture?.(event.pointerId);
+
+      // Maj (ou Ctrl) ajoute la zone à la sélection au lieu de la remplacer :
+      // c'est ce qui permet de pousser trois logos d'un seul geste. Un
+      // Maj-clic sur une zone seule sélectionnée la désélectionne — le geste
+      // inverse doit exister, sinon on ne sait plus sortir d'une sélection.
+      // La sélection se recalcule ici et non via `toggleSelect` : le geste a
+      // besoin des positions de départ des zones entraînées dans la seconde
+      // même que l'appui est reçu.
+      const additif = event.shiftKey || event.ctrlKey || event.metaKey;
+      const dejaPrise = isSelected(state.selection, "mask", zone.id);
+      const groupe = state.selection?.kind === "mask" ? state.selection.ids : [];
+      const ids = additif
+        ? dejaPrise
+          ? groupe.filter((x) => x !== zone.id)
+          : [...groupe, zone.id]
+        : dejaPrise
+          ? groupe
+          : [zone.id];
+
+      dispatch({
+        type: "select",
+        selection: ids.length ? { kind: "mask", ids } : null,
+      });
+
       setDrag({
         id: zone.id,
         mode,
@@ -143,10 +170,18 @@ export function PreviewStage() {
         startY: event.clientY,
         boxW: element.clientWidth,
         boxH: element.clientHeight,
+        groupe: (() => {
+          // Les positions de départ, jamais les positions courantes : le delta
+          // serait sinon rejoué à chaque événement sur une zone déjà déplacée.
+          const tenues = new Set(ids.length ? ids : [zone.id]);
+          const bases = project.masks
+            .filter((m) => tenues.has(m.id))
+            .map((m) => ({ id: m.id, x: m.x, y: m.y }));
+          return bases.length > 1 ? bases : undefined;
+        })(),
       });
-      dispatch({ type: "select", selection: { kind: "mask", id: zone.id } });
     },
-    [dispatch],
+    [dispatch, state.selection, project.masks],
   );
 
   useEffect(() => {
@@ -173,9 +208,23 @@ export function PreviewStage() {
         }
       }
 
+      // Un déplacement de groupe suit l'écart voulu du cadre tenu — pas sa
+      // valeur finale bornée : sinon la première zone collée au bord ferait
+      // traîner les autres. Le redimensionnement, lui, reste une affaire de
+      // bord à bord : étirer trois zones de largeurs différentes à la fois
+      // ne veut rien dire de précis.
+      const groupe =
+        drag.mode === "move" && drag.groupe ? new Map(drag.groupe.map((g) => [g.id, g])) : null;
+      const pas = { x: zone.x - drag.origin.x, y: zone.y - drag.origin.y };
+
       dispatch({
         type: "setMasks",
-        masks: project.masks.map((m) => (m.id === drag.id ? clampZone({ ...m, ...zone }) : m)),
+        masks: project.masks.map((m) => {
+          if (m.id === drag.id) return clampZone({ ...m, ...zone });
+          const base = groupe?.get(m.id);
+          if (base) return clampZone({ ...m, x: base.x + pas.x, y: base.y + pas.y });
+          return m;
+        }),
         mergeKey: `mask:${drag.id}`,
       });
     };
@@ -313,7 +362,7 @@ export function PreviewStage() {
                           height: `${zone.h * 100}%`,
                         }}
                         onPointerDown={(event) => beginDrag(event, zone, "move")}
-                        title={`${zone.label} — glisse pour déplacer, les poignées pour redimensionner`}
+                        title={`${zone.label} — glisse pour déplacer, les poignées pour redimensionner, Maj-clic pour ajouter à la sélection`}
                       >
                         <span className={`ed-mask-label${zone.y < 0.05 ? " below" : ""}`}>
                           {zone.label}
@@ -464,5 +513,5 @@ function EmptyStage() {
 
 /** La zone actuellement saisie dans l'inspecteur. */
 function maskSelected(selection: Selection, id: string): boolean {
-  return selection?.kind === "mask" && selection.id === id;
+  return isSelected(selection, "mask", id);
 }

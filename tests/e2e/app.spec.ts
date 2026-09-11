@@ -113,7 +113,7 @@ test("un fichier trop lourd est refusé avec un message explicite", async ({ pag
   await page.goto("/", { waitUntil: "domcontentloaded" });
   await expectHydrated(page);
 
-  const input = page.locator('input[type="file"]');
+  const input = page.locator("#ed-import-plan");
   await expect(input).toBeAttached();
 
   // Playwright refuse un buffer de plus de 50 Mo : le fichier est donc
@@ -125,7 +125,7 @@ test("un fichier trop lourd est refusé avec un message explicite", async ({ pag
   // environnements à mémoire contrainte — un « Target crashed » trompeur,
   // qui ressemble à un bug applicatif alors que le test seul est en cause.
   await page.evaluate(() => {
-    const input = document.querySelector('input[type="file"]');
+    const input = document.querySelector("#ed-import-plan");
     if (!(input instanceof HTMLInputElement)) throw new Error("champ fichier introuvable");
     const file = new File([new Uint8Array(1024)], "trop-lourd.mp4", { type: "video/mp4" });
     Object.defineProperty(file, "size", { value: 61 * 1024 * 1024 });
@@ -144,7 +144,7 @@ test("un plan importé entre dans le monteur", async ({ page }) => {
 
   // Vraie vidéo H.264 : un buffer vide était rejeté au décodage, et la piste
   // restait vide sans qu'aucun message ne l'explique.
-  await page.locator('input[type="file"]').setInputFiles(CLIP);
+  await page.locator("#ed-import-plan").setInputFiles(CLIP);
 
   // Le plan atterrit sur la piste vidéo, mesuré et non plus seulement « accepté » :
   // la durée et les dimensions viennent du décodage navigateur.
@@ -291,7 +291,7 @@ test("le rendu local incruste la timeline et rend un fichier", async ({ page }) 
 
   await page.goto("/", { waitUntil: "domcontentloaded" });
   await expectHydrated(page);
-  await page.locator('input[type="file"]').setInputFiles(CLIP);
+  await page.locator("#ed-import-plan").setInputFiles(CLIP);
   await expectImportedClip(page);
   // Le compte des cues part de zéro : posé sur la démo, le « c » suivant aurait
   // ajouté un septième bloc à un plan qui allait être remplacé.
@@ -647,4 +647,198 @@ test("la hauteur de la timeline se tire par son bord et rend de la place au plan
   await page.waitForTimeout(300);
   const apresDoubleClic = await mesures();
   expect(apresDoubleClic.timeline).toBeGreaterThan(serre.timeline + 20);
+});
+
+/* --------------------------------------------------------------------------
+   Déposer un plan, reprendre plusieurs blocs, voir la légende suivre le cadre
+   -------------------------------------------------------------------------- */
+
+const fixtureVideo = fileURLToPath(new URL("./fixtures/clip.mp4", import.meta.url));
+
+test("déposer un plan n'importe où dans la fenêtre l'importe vraiment", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 810 });
+  await page.goto("/", { waitUntil: "networkidle" });
+  await expectHydrated(page);
+  await expect(page.locator(".ed-mask").first()).toBeVisible({ timeout: 30_000 });
+  const nomInitial = await page.locator(".ed-project-name").inputValue();
+
+  const data = await import("node:fs").then((fs) =>
+    fs.readFileSync(fixtureVideo).toString("base64"),
+  );
+
+  // Le filetage du geste d'abord : survoler doit ouvrir le bandeau de dépôt.
+  await page.evaluate(async (b64) => {
+    const bin = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+    const transfer = new DataTransfer();
+    transfer.items.add(new File([bin], "plan-depose.mp4", { type: "video/mp4" }));
+    const cible = document.querySelector(".ed-stage")!;
+    cible.dispatchEvent(
+      new DragEvent("dragenter", { bubbles: true, cancelable: true, dataTransfer: transfer }),
+    );
+    cible.dispatchEvent(
+      new DragEvent("dragover", { bubbles: true, cancelable: true, dataTransfer: transfer }),
+    );
+    (window as unknown as { __transfert: DataTransfer }).__transfert = transfer;
+  }, data);
+  await expect(page.locator(".ed-drop-overlay")).toBeVisible();
+
+  await page.evaluate(() => {
+    const cible = document.querySelector(".ed-stage")!;
+    const transfer = (window as unknown as { __transfert: DataTransfer }).__transfert;
+    cible.dispatchEvent(
+      new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer: transfer }),
+    );
+  });
+
+  // Le plan déposé tient la scène, et le bandeau s'efface avec le geste.
+  await expect(page.locator(".ed-project-name")).not.toHaveValue(nomInitial, { timeout: 30_000 });
+  await expect(page.locator(".ed-project-name")).toHaveValue("plan-depose");
+  await expect(page.locator(".ed-drop-overlay")).toHaveCount(0);
+});
+
+test("la marée et Maj-clic reprennent plusieurs blocs, qui se déplacent ensemble", async ({
+  page,
+}) => {
+  await openDemoWithMasks(page);
+
+  const blocs = page.locator('[data-lane="subs"] .ed-clip');
+  await expect(blocs).toHaveCount(6);
+  const selectionnes = () => page.locator('[data-lane="subs"] .ed-clip.is-selected').count();
+
+  // Maj-clic ajoute à la sélection, sans la remplacer.
+  await blocs.nth(1).click();
+  expect(await selectionnes()).toBe(1);
+  await blocs.nth(2).click({ modifiers: ["Shift"] });
+  expect(await selectionnes()).toBe(2);
+
+  const avant = await Promise.all([1, 2].map(async (i) => (await blocs.nth(i).boundingBox())!.x));
+
+  // Glisser l'un des deux déplace les deux du même écart.
+  const tenu = await blocs.nth(1).boundingBox();
+  await page.mouse.move(tenu!.x + tenu!.width / 2, tenu!.y + tenu!.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(tenu!.x + tenu!.width / 2 + 60, tenu!.y + tenu!.height / 2, { steps: 10 });
+  await page.mouse.up();
+  await page.waitForTimeout(300);
+
+  const apres = await Promise.all([1, 2].map(async (i) => (await blocs.nth(i).boundingBox())!.x));
+  expect(Math.abs(apres[0] - avant[0] - 60)).toBeLessThan(12);
+  expect(Math.abs(apres[1] - avant[1] - 60)).toBeLessThan(12);
+
+  // Suppr efface le groupe entier — et un seul pas d'annulation le rend.
+  await page.keyboard.press("Delete");
+  await expect(blocs).toHaveCount(4);
+  await page.keyboard.press("Control+z");
+  await expect(blocs).toHaveCount(6);
+
+  // La marée sur le fond d'une piste prend tout ce qu'elle encadre.
+  const coupes = await page.locator('[data-lane="cuts"]').boundingBox();
+  await page.mouse.move(coupes!.x + 40, coupes!.y + coupes!.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(coupes!.x + coupes!.width - 40, coupes!.y + coupes!.height / 2, {
+    steps: 12,
+  });
+  await page.mouse.up();
+  await page.waitForTimeout(250);
+  expect(
+    await page.locator('[data-lane="subs"] .ed-clip.is-selected').count(),
+  ).toBeGreaterThanOrEqual(4);
+});
+
+test("les zones sélectionnées se déplacent en groupe dans la scène", async ({ page }) => {
+  await openDemoWithMasks(page);
+
+  const zones = page.locator(".ed-mask");
+  const position = (i: number) =>
+    page.evaluate((k) => {
+      const style = document.querySelectorAll<HTMLElement>(".ed-mask")[k].style;
+      return { left: parseFloat(style.left), top: parseFloat(style.top) };
+    }, i);
+
+  await zones.nth(1).click();
+  await zones.nth(2).click({ modifiers: ["Shift"] });
+  await expect(zones.nth(1)).toHaveClass(/is-selected/);
+  await expect(zones.nth(2)).toHaveClass(/is-selected/);
+
+  const avant1 = await position(1);
+  const avant2 = await position(2);
+  const tenu = await zones.nth(1).boundingBox();
+  await page.mouse.move(tenu!.x + tenu!.width / 2, tenu!.y + tenu!.height / 2);
+  await page.mouse.down();
+  // Vers le bas seulement : les deux zones touchent un bord horizontal, et
+  // `clampZone` les y retient — un écart mesuré sur un axe libre est net.
+  await page.mouse.move(tenu!.x + tenu!.width / 2, tenu!.y + tenu!.height / 2 + 30, { steps: 10 });
+  await page.mouse.up();
+  await page.waitForTimeout(300);
+
+  const apres1 = await position(1);
+  const apres2 = await position(2);
+  expect(apres1.top).toBeGreaterThan(avant1.top + 1);
+  expect(apres2.top).toBeGreaterThan(avant2.top + 1);
+  // Le même écart pour les deux, au point près : c'est ce que le geste promet.
+  expect(Math.abs(apres2.top - avant2.top - (apres1.top - avant1.top))).toBeLessThan(0.6);
+});
+
+test("la légende suit le cadre : tirer la bande déplace le texte incrusté", async ({ page }) => {
+  await openDemoWithMasks(page);
+
+  // Une légende à l'écran d'abord : un clic sur le fond de la piste des coupes
+  // amène la tête de lecture dans le premier bloc, où le texte est affiché.
+  const coupes = await page.locator('[data-lane="cuts"]').boundingBox();
+  await page.mouse.click(coupes!.x + 40, coupes!.y + coupes!.height / 2);
+  await page.waitForTimeout(500);
+  const titre = page.locator(".ed-subtitle");
+  await expect(titre).toBeVisible();
+
+  const bord = (selecteur: string) =>
+    page.evaluate((s) => document.querySelector(s)!.getBoundingClientRect().top, selecteur);
+  const cadreAvant = await bord(".ed-mask");
+  const hautAvant = await bord(".ed-subtitle");
+
+  const bande = await page.locator(".ed-mask").first().boundingBox();
+  await page.mouse.move(bande!.x + bande!.width / 2, bande!.y + bande!.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(bande!.x + bande!.width / 2, bande!.y + bande!.height / 2 - 80, {
+    steps: 10,
+  });
+  await page.mouse.up();
+  await page.waitForTimeout(500);
+
+  // C'est le reproche reçu : le cadre montait, la légende restait clouée en
+  // bas — la scène mentait sur ce que l'export allait incruster.
+  expect(cadreAvant - (await bord(".ed-mask"))).toBeGreaterThan(50);
+  expect(hautAvant - (await bord(".ed-subtitle"))).toBeGreaterThan(50);
+});
+
+test("l'import ne dépend pas d'un volet replié", async ({ page }) => {
+  // Le reproche reçu : « impossible de déposer quoi que ce soit ». La seule
+  // entrée visible était la zone du panneau gauche — et ce panneau se replie,
+  // et sur un petit écran il l'est d'office. Le chemin d'import doit donc tenir
+  // dans la barre du haut, volet ouvert ou fermé.
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await page.goto("/", { waitUntil: "domcontentloaded" });
+  await expectHydrated(page);
+
+  const bouton = page.locator('button:has-text("Importer un plan")');
+  await expect(bouton).toBeVisible();
+  await expect(page.locator("#ed-import-plan")).toBeAttached();
+  await expect(page.locator("#ed-import-media")).toBeAttached();
+
+  // La médiathèque repliée, son champ disparaît de l'écran : celui du haut doit
+  // rester là, sinon le bouton ne fait plus rien d'apparent.
+  const colonne = page.locator(".ed-main");
+  await expect(colonne).toHaveAttribute("data-left", "open");
+  await page.locator('.ed-seg-btn:has-text("Médiathèque")').click();
+  await expect(colonne).toHaveAttribute("data-left", "closed");
+  await expect(bouton).toBeVisible();
+  await expect(page.locator("#ed-import-plan")).toBeAttached();
+
+  // Et le bouton ouvre bien la boîte de sélection du fichier.
+  const choix = page.waitForEvent("filechooser");
+  await bouton.click();
+  const chooser = await choix;
+  await chooser.setFiles(CLIP);
+  await expect(page.locator(".ed-project-name")).not.toHaveValue("Démo — doublage vertical", {
+    timeout: 30_000,
+  });
 });

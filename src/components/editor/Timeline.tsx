@@ -9,8 +9,9 @@ import {
 
 import { buildThumbs, releaseThumbs, type Thumb } from "@/lib/editor/thumbs";
 import { decodeMediaPeaks, peaksForRanges } from "@/lib/editor/waveform";
-import { buildTicks, formatClock, round3 } from "@/lib/editor/edl";
+import { buildTicks, formatClock, round3, sourceToTimeline } from "@/lib/editor/edl";
 import { TRACK_LAYOUT, type Clip, type Project, type TrackId } from "@/lib/editor/types";
+import { isSelected } from "@/lib/editor/store";
 
 import { IconButton } from "./ui";
 import { useEditor, useEditorActions } from "./editor-context";
@@ -44,6 +45,8 @@ type DragSpec = {
   started: boolean;
   /** Plage au début du geste : le delta s'y applique, jamais à la position courante. */
   origin: { start: number; end: number };
+  /** Blocs entraînés, saisis à leur position de départ (sélection multiple). */
+  groupe?: { id: string; start: number }[];
 };
 
 export function Timeline() {
@@ -110,7 +113,14 @@ export function Timeline() {
     const onMove = (event: PointerEvent) => {
       const delta = (event.clientX - drag.startX) / px;
       if (!drag.started && Math.abs(event.clientX - drag.startX) < 3) return;
-      dispatch({ type: "dragClip", id: drag.id, delta, mode: drag.mode, origin: drag.origin });
+      dispatch({
+        type: "dragClip",
+        id: drag.id,
+        delta,
+        mode: drag.mode,
+        origin: drag.origin,
+        groupe: drag.groupe,
+      });
       if (!drag.started) setDrag({ ...drag, started: true });
     };
     const onUp = () => {
@@ -129,7 +139,24 @@ export function Timeline() {
     if (locked.has(clip.track) || !project.source) return;
     event.stopPropagation();
     event.preventDefault();
-    dispatch({ type: "select", selection: { kind: "clip", id: clip.id } });
+    // Maj (ou Ctrl) ajoute le bloc à la sélection au lieu de la remplacer. Un
+    // bloc déjà tenu dans un groupe la conserve telle quelle : le glissement
+    // qui suit déplace le groupe entier, et non le seul bloc sous le curseur.
+    // L'identity est calculée ici plutôt que par l'action `toggleSelect` : les
+    // origines du groupe doivent être saisies dans le même élan, au moment où
+    // l'appui est encore unique — sinon le glissement rejouerait son écart sur
+    // des positions déjà déplacées.
+    const additif = event.shiftKey || event.ctrlKey || event.metaKey;
+    const dejaPris = isSelected(state.selection, "clip", clip.id);
+    const groupe = state.selection?.kind === "clip" ? state.selection.ids : [];
+    const ids = additif
+      ? dejaPris
+        ? groupe.filter((x) => x !== clip.id)
+        : [...groupe, clip.id]
+      : dejaPris
+        ? groupe
+        : [clip.id];
+    dispatch({ type: "select", selection: ids.length ? { kind: "clip", ids } : null });
     if (clip.track === "subs") dispatch({ type: "ui", patch: { inspectorTab: "clip" } });
     setDrag({
       id: clip.id,
@@ -137,6 +164,12 @@ export function Timeline() {
       startX: event.clientX,
       started: false,
       origin: { start: clip.start, end: clip.start + clip.duration },
+      groupe:
+        ids.length > 1
+          ? project.clips
+              .filter((c) => ids.includes(c.id))
+              .map((c) => ({ id: c.id, start: c.start }))
+          : undefined,
     });
   };
 
@@ -154,6 +187,74 @@ export function Timeline() {
   };
 
   const dragged = drag ? project.clips.find((clip) => clip.id === drag.id) : undefined;
+
+  /* --------------------------- sélectionner à la marée --------------------- */
+
+  /**
+   * Sur le fond d'une piste : un clic simple amène la tête de lecture (le geste
+   * habituel de navigation), un glisser encadre une plage et prend **tous** les
+   * blocs qu'elle touche. Sans ça, reprendre six sous-titres voulait dire six
+   * clics, puis six glissements — et c'est exactement là que le montage
+   * redevient un formulaire.
+   */
+  const [marquee, setMarquee] = useState<{ t0: number; t1: number } | null>(null);
+
+  const plageTouchee = (clip: Clip, t0: number, t1: number) => {
+    if (clip.track === "video") {
+      // Le plan tenu n'est pas un bloc continu : ce sont les plages gardées,
+      // creusées par les coupes. Un cadre qui ne touche qu'un trou ne prend
+      // donc pas le clip — ce qu'on voit est ce qu'on sélectionne.
+      return derived.keeps.some((k) => k.start < t1 && k.end > t0);
+    }
+    const debut = sourceToTimeline(clip.start, derived.keeps);
+    const fin = sourceToTimeline(clip.start + clip.duration, derived.keeps);
+    return debut < t1 && fin > t0;
+  };
+
+  const surFondDePiste = (event: React.PointerEvent<HTMLDivElement>) => {
+    const x0 = event.clientX;
+    const additif = event.shiftKey || event.ctrlKey || event.metaKey;
+    let enMouvement = false;
+
+    const onMove = (move: PointerEvent) => {
+      if (!enMouvement && Math.abs(move.clientX - x0) < 5) return;
+      enMouvement = true;
+      const a = timeAt(Math.min(x0, move.clientX));
+      const b = timeAt(Math.max(x0, move.clientX));
+      setMarquee({ t0: a, t1: b });
+    };
+
+    const onUp = (move: PointerEvent) => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      if (!enMouvement) {
+        dispatch({ type: "seek", time: timeAt(x0) });
+        setMarquee(null);
+        return;
+      }
+      const t0 = timeAt(Math.min(x0, move.clientX));
+      const t1 = timeAt(Math.max(x0, move.clientX));
+      const visibles = project.clips.filter((clip) =>
+        clip.track === "subs" ? ui.showSubs : !hidden.has(clip.track),
+      );
+      const pris = visibles
+        .filter((clip) => !locked.has(clip.track) && plageTouchee(clip, t0, t1))
+        .map((clip) => clip.id);
+      const groupe = additif && state.selection?.kind === "clip" ? state.selection.ids : [];
+      const ids = [...new Set([...groupe, ...pris])];
+      dispatch({ type: "select", selection: ids.length ? { kind: "clip", ids } : null });
+      setMarquee(null);
+      if (ids.length > 1) {
+        actions.notify({
+          kind: "info",
+          text: `${ids.length} blocs en main — glisser l'un déplace les ${ids.length}, Suppr les efface.`,
+        });
+      }
+    };
+
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  };
 
   /**
    * La hauteur de la timeline se tire par son bord supérieur. Ce n'est pas un
@@ -382,7 +483,7 @@ export function Timeline() {
             <Lane
               track="video"
               px={px}
-              onPointerDownBackground={seekFrom}
+              onPointerDownBackground={surFondDePiste}
               onDragOver={(event) => allowDrop(event, "video", setDropLane)}
               onDragLeave={() => setDropLane(null)}
               onDrop={(event) => onDropStyle(event, "video")}
@@ -446,7 +547,7 @@ export function Timeline() {
               <Lane
                 track="cuts"
                 px={px}
-                onPointerDownBackground={seekFrom}
+                onPointerDownBackground={surFondDePiste}
                 onDragOver={(event) => allowDrop(event, "cuts", setDropLane)}
                 onDragLeave={() => setDropLane(null)}
                 onDrop={(event) => onDropStyle(event, "cuts")}
@@ -464,7 +565,7 @@ export function Timeline() {
                       key={clip.id}
                       clip={clip}
                       px={px}
-                      selected={state.selection?.kind === "clip" && state.selection.id === clip.id}
+                      selected={isSelected(state.selection, "clip", clip.id)}
                       onPointerDown={(event, mode) => beginClipDrag(event, clip, mode)}
                       label={`${clip.reason === "silence" ? "silence" : "coupe"} ${round3(clip.duration).toFixed(2)}s`}
                       onDoubleClick={() => dispatch({ type: "deleteSelection" })}
@@ -481,7 +582,7 @@ export function Timeline() {
               <Lane
                 track="subs"
                 px={px}
-                onPointerDownBackground={seekFrom}
+                onPointerDownBackground={surFondDePiste}
                 onDragOver={(event) => allowDrop(event, "subs", setDropLane)}
                 onDragLeave={() => setDropLane(null)}
                 onDrop={(event) => onDropStyle(event, "subs")}
@@ -491,7 +592,7 @@ export function Timeline() {
                     key={clip.id}
                     clip={clip}
                     px={px}
-                    selected={state.selection?.kind === "clip" && state.selection.id === clip.id}
+                    selected={isSelected(state.selection, "clip", clip.id)}
                     onPointerDown={(event, mode) => beginClipDrag(event, clip, mode)}
                     label={clip.text ?? clip.label}
                     modifier={clip.start + clip.duration}
@@ -505,7 +606,7 @@ export function Timeline() {
 
             {/* voix off */}
             {!hidden.has("dub") ? (
-              <Lane track="dub" px={px} onPointerDownBackground={seekFrom}>
+              <Lane track="dub" px={px} onPointerDownBackground={surFondDePiste}>
                 {project.clips
                   .filter((clip) => clip.track === "dub")
                   .map((clip) => (
@@ -513,7 +614,7 @@ export function Timeline() {
                       key={clip.id}
                       clip={clip}
                       px={px}
-                      selected={state.selection?.kind === "clip" && state.selection.id === clip.id}
+                      selected={isSelected(state.selection, "clip", clip.id)}
                       onPointerDown={(event, mode) => beginClipDrag(event, clip, mode)}
                       label={clip.label}
                       peaks={clip.peaks}
@@ -526,6 +627,16 @@ export function Timeline() {
             ) : (
               <EmptyLane height={TRACK_LAYOUT[3].height} />
             )}
+
+            {marquee ? (
+              <div
+                className="ed-marquee"
+                style={{
+                  left: marquee.t0 * px,
+                  width: Math.max(2, (marquee.t1 - marquee.t0) * px),
+                }}
+              />
+            ) : null}
 
             {/* tête de lecture */}
             <div className="ed-playhead" style={{ left: ui.playhead * px }} />
@@ -573,7 +684,7 @@ function Lane({
   track: TrackId;
   px: number;
   children: React.ReactNode;
-  onPointerDownBackground?: (clientX: number) => void;
+  onPointerDownBackground?: (event: React.PointerEvent<HTMLDivElement>) => void;
   onDragOver?: (event: React.DragEvent) => void;
   onDragLeave?: () => void;
   onDrop?: (event: React.DragEvent) => void;
@@ -591,7 +702,7 @@ function Lane({
       }
       onPointerDown={(event) => {
         if (event.target === event.currentTarget && onPointerDownBackground) {
-          onPointerDownBackground(event.clientX);
+          onPointerDownBackground(event);
         }
       }}
       onDragOver={onDragOver}

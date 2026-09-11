@@ -19,6 +19,7 @@ import {
 } from "@/lib/config-io";
 import type { PanelTab } from "@/lib/editor/store";
 import type { Clip } from "@/lib/editor/types";
+import { isSelected, onlySelection } from "@/lib/editor/store";
 
 import { Chips, Icon, IconButton, Kv, Notice, Section, Slider, Switch } from "./ui";
 import { useEditor, useEditorActions } from "./editor-context";
@@ -142,6 +143,7 @@ function MediaTab() {
       </div>
       <input
         ref={inputRef}
+        id="ed-import-media"
         type="file"
         accept="video/*"
         className="sr-only"
@@ -438,7 +440,7 @@ function SubtitlesTab() {
 function CueRow({ clip, index, next }: { clip: Clip; index: number; next: Clip | null }) {
   const { state, dispatch } = useEditor();
   const actions = useEditorActions();
-  const selected = state.selection?.kind === "clip" && state.selection.id === clip.id;
+  const selected = isSelected(state.selection, "clip", clip.id);
 
   return (
     <div
@@ -448,8 +450,12 @@ function CueRow({ clip, index, next }: { clip: Clip; index: number; next: Clip |
       <button
         type="button"
         style={{ color: "var(--ed-text-faint)", textAlign: "left" }}
-        onClick={() => {
-          dispatch({ type: "select", selection: { kind: "clip", id: clip.id } });
+        onClick={(event) => {
+          const multi = event.shiftKey || event.ctrlKey || event.metaKey;
+          // Deux actions distinctes, pas un objet à moitié commun : l'union
+          // discriminée du réducteur ne se reconstitue pas toute seule.
+          if (multi) dispatch({ type: "toggleSelect", kind: "clip", id: clip.id });
+          else dispatch({ type: "select", selection: onlySelection("clip", clip.id) });
           dispatch({ type: "seek", time: clip.start });
         }}
         title="Aller à ce bloc"
@@ -462,7 +468,7 @@ function CueRow({ clip, index, next }: { clip: Clip; index: number; next: Clip |
         aria-label={`Texte du sous-titre ${index + 1}`}
         className="ed-textarea"
         style={{ minHeight: 30, padding: "4px 6px" }}
-        onFocus={() => dispatch({ type: "select", selection: { kind: "clip", id: clip.id } })}
+        onFocus={() => dispatch({ type: "select", selection: onlySelection("clip", clip.id) })}
         onChange={(event) =>
           actions.updateClip(clip.id, { text: event.target.value }, `cue:${clip.id}`)
         }
@@ -473,7 +479,7 @@ function CueRow({ clip, index, next }: { clip: Clip; index: number; next: Clip |
             (event.target as HTMLTextAreaElement).blur();
             // Entrée = bloc suivant, comme dans un tableur de montage.
             if (next) {
-              dispatch({ type: "select", selection: { kind: "clip", id: next.id } });
+              dispatch({ type: "select", selection: onlySelection("clip", next.id) });
               dispatch({ type: "seek", time: next.start });
             }
           }
@@ -1002,7 +1008,7 @@ function MasksTab() {
 
         <div className="flex flex-col gap-1">
           {project.masks.map((zone) => {
-            const selected = state.selection?.kind === "mask" && state.selection.id === zone.id;
+            const selected = isSelected(state.selection, "mask", zone.id);
             return (
               <div
                 key={zone.id}
@@ -1020,8 +1026,12 @@ function MasksTab() {
                   <button
                     type="button"
                     style={{ color: "var(--ed-text)", fontSize: 12.5, fontWeight: 600 }}
-                    onClick={() =>
-                      dispatch({ type: "select", selection: { kind: "mask", id: zone.id } })
+                    onClick={(event) =>
+                      dispatch(
+                        event.shiftKey || event.ctrlKey || event.metaKey
+                          ? { type: "toggleSelect", kind: "mask", id: zone.id }
+                          : { type: "select", selection: onlySelection("mask", zone.id) },
+                      )
                     }
                     title="Sélectionner pour ajuster dans la scène"
                   >

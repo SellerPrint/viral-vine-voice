@@ -1,7 +1,15 @@
 import { describe, expect, it } from "vitest";
 
-import { EMPTY_PROJECT, makeClip } from "./project";
-import { createEditorState, editorReducer, MIN_CLIP, type Action, type EditorState } from "./store";
+import { EMPTY_PROJECT, makeClip, projectPreset } from "./project";
+import type { MaskZone } from "@/lib/video/presets";
+import {
+  createEditorState,
+  editorReducer,
+  MIN_CLIP,
+  ZONE_SOUS_TITRES,
+  type Action,
+  type EditorState,
+} from "./store";
 import type { Clip, Project, SourceMedia } from "./types";
 
 /**
@@ -213,7 +221,7 @@ describe("splitAtPlayhead", () => {
     const start = state({
       clips: [clip],
       ui: { playhead: 1.5 },
-      selection: { kind: "clip", id: clip.id },
+      selection: { kind: "clip", ids: [clip.id] },
     });
     const next = run(start, { type: "splitAtPlayhead" });
     expect(p(next).clips).toHaveLength(2);
@@ -223,7 +231,7 @@ describe("splitAtPlayhead", () => {
         .sort(),
     ).toEqual([1.5, 2.5]);
     expect(p(next).clips.every((c) => c.text === "une phrase")).toBe(true);
-    expect(next.selection).toEqual({ kind: "clip", id: p(next).clips[1].id });
+    expect(next.selection).toEqual({ kind: "clip", ids: [p(next).clips[1].id] });
   });
 
   it("ne coupe pas à moins d'un fragment exploitable du bord", () => {
@@ -231,7 +239,7 @@ describe("splitAtPlayhead", () => {
     const start = state({
       clips: [clip],
       ui: { playhead: 0.05 },
-      selection: { kind: "clip", id: clip.id },
+      selection: { kind: "clip", ids: [clip.id] },
     });
     expect(p(run(start, { type: "splitAtPlayhead" })).clips).toHaveLength(1);
   });
@@ -253,7 +261,7 @@ describe("blocs et coupes", () => {
   it("ajoute un sous-titre à la tête de lecture et le sélectionne", () => {
     const next = run(state({ ui: { playhead: 3 } }), { type: "addCueAtPlayhead" });
     expect(p(next).clips[0]).toMatchObject({ track: "subs", start: 3, duration: 2 });
-    expect(next.selection).toEqual({ kind: "clip", id: p(next).clips[0].id });
+    expect(next.selection).toEqual({ kind: "clip", ids: [p(next).clips[0].id] });
   });
 
   it("rogné le bloc ajouté près de la fin au lieu de le laisser déborder", () => {
@@ -270,7 +278,7 @@ describe("blocs et coupes", () => {
 
   it("supprime le bloc sélectionné et rend la sélection", () => {
     const clip = sub(1, 2);
-    const next = run(state({ clips: [clip], selection: { kind: "clip", id: clip.id } }), {
+    const next = run(state({ clips: [clip], selection: { kind: "clip", ids: [clip.id] } }), {
       type: "deleteSelection",
     });
     expect(p(next).clips).toHaveLength(0);
@@ -282,7 +290,10 @@ describe("blocs et coupes", () => {
     const withMask = run(base, { type: "addMask" });
     const id = p(withMask).masks[0].id;
     expect(p(withMask).masks[0].enabled).toBe(true);
-    const off = run({ ...withMask, selection: { kind: "mask", id } }, { type: "deleteSelection" });
+    const off = run(
+      { ...withMask, selection: { kind: "mask", ids: [id] } },
+      { type: "deleteSelection" },
+    );
     expect(p(off).masks).toHaveLength(1);
     expect(p(off).masks[0].enabled).toBe(false);
   });
@@ -291,7 +302,7 @@ describe("blocs et coupes", () => {
 describe("nudge, seek, annulation", () => {
   it("décale le bloc sélectionné image par image", () => {
     const clip = sub(2, 1);
-    const next = run(state({ clips: [clip], selection: { kind: "clip", id: clip.id } }), {
+    const next = run(state({ clips: [clip], selection: { kind: "clip", ids: [clip.id] } }), {
       type: "nudgeSelection",
       seconds: 1 / 30,
     });
@@ -300,7 +311,7 @@ describe("nudge, seek, annulation", () => {
 
   it("refuse de sortir du média", () => {
     const clip = sub(9.6, 1);
-    const next = run(state({ clips: [clip], selection: { kind: "clip", id: clip.id } }), {
+    const next = run(state({ clips: [clip], selection: { kind: "clip", ids: [clip.id] } }), {
       type: "nudgeSelection",
       seconds: 2,
     });
@@ -336,7 +347,7 @@ describe("setMasks", () => {
   it("un glisser de zone répété ne crée qu'une entrée d'historique", () => {
     const base = run(state({}), { type: "addMask" });
     const id = p(base).masks[0].id;
-    const dragged = run(base, { type: "select", selection: { kind: "mask", id } });
+    const dragged = run(base, { type: "select", selection: { kind: "mask", ids: [id] } });
     const merged = run(
       dragged,
       { type: "setMasks", masks: [{ ...p(dragged).masks[0], x: 0.3 }], mergeKey: `mask:${id}` },
@@ -358,5 +369,179 @@ describe("makeClip", () => {
     const clip = makeClip("cuts", { start: 5, end: 2 });
     expect(clip.start).toBe(2);
     expect(clip.duration).toBe(3);
+  });
+});
+
+describe("sélection multiple", () => {
+  it("ajoute, retire, et rend une sélection vide à null", () => {
+    const start = state({ clips: [sub(1, 2), sub(4, 2), sub(7, 2)] });
+
+    const un = run(start, { type: "toggleSelect", kind: "clip", id: "sub-4" });
+    expect(un.selection).toEqual({ kind: "clip", ids: ["sub-4"] });
+
+    const deux = run(un, { type: "toggleSelect", kind: "clip", id: "sub-7" });
+    expect(deux.selection).toEqual({ kind: "clip", ids: ["sub-4", "sub-7"] });
+
+    const retire = run(deux, { type: "toggleSelect", kind: "clip", id: "sub-4" });
+    expect(retire.selection).toEqual({ kind: "clip", ids: ["sub-7"] });
+
+    expect(run(retire, { type: "toggleSelect", kind: "clip", id: "sub-7" }).selection).toBeNull();
+  });
+
+  it("une sélection de zones ne se laisse pas voler par un bloc de texte", () => {
+    // Changer de nature à chaque Maj-clic aurait fait défiler l'inspecteur d'un
+    // panneau à l'autre pendant qu'on tient une sélection de blocs.
+    const zones = run(state({}), { type: "toggleSelect", kind: "mask", id: "bottom" });
+    const melange = run(zones, { type: "toggleSelect", kind: "clip", id: "sub-1" });
+    expect(melange.selection).toEqual({ kind: "clip", ids: ["sub-1"] });
+  });
+
+  it("un groupe avance d'un même écart, le bloc laissé de côté ne bouge pas", () => {
+    const start = state({
+      clips: [sub(1, 2), sub(4, 2), sub(7, 2)],
+      ui: { snap: false, zoom: 46 },
+      selection: { kind: "clip", ids: ["sub-1", "sub-4"] },
+    });
+    const next = run(start, {
+      type: "dragClip",
+      id: "sub-1",
+      delta: 1,
+      mode: "move",
+      origin: rangeOf(p(start), "sub-1"),
+      groupe: [
+        { id: "sub-1", start: 1 },
+        { id: "sub-4", start: 4 },
+      ],
+    });
+    expect(p(next).clips.map((c) => c.start)).toEqual([2, 5, 7]);
+  });
+
+  it("deux événements consécutifs ne cumulent pas l'écart du groupe", () => {
+    // Le reproche mesuré une première fois sur les zones : l'écart était
+    // ajouté à la position déjà déplacée, donc la zone suiveuse partait deux
+    // fois plus loin que la zone tenue. Chaque événement doit se relire depuis
+    // les origines du geste.
+    const start = state({
+      clips: [sub(1, 2), sub(4, 2)],
+      ui: { snap: false, zoom: 46 },
+    });
+    const groupe = [
+      { id: "sub-1", start: 1 },
+      { id: "sub-4", start: 4 },
+    ];
+    const geste = {
+      type: "dragClip",
+      id: "sub-1",
+      mode: "move",
+      origin: { start: 1, end: 3 },
+      groupe,
+    } as const;
+    const un = run(start, { ...geste, delta: 0.5 });
+    const deux = run(un, { ...geste, delta: 1 });
+    expect(p(deux).clips.map((c) => c.start)).toEqual([2, 5]);
+  });
+
+  it("un trim ne se propage pas au groupe", () => {
+    // Étirer la fin de trois blocs de trois contenus différents n'est pas un
+    // geste volontaire : la poignée reste une affaire de bord à bord.
+    const start = state({
+      clips: [sub(1, 2), sub(4, 2)],
+      ui: { snap: false, zoom: 46 },
+      selection: { kind: "clip", ids: ["sub-1", "sub-4"] },
+    });
+    const next = run(start, {
+      type: "dragClip",
+      id: "sub-1",
+      delta: 0.5,
+      mode: "trim-right",
+      origin: rangeOf(p(start), "sub-1"),
+      groupe: [
+        { id: "sub-1", start: 1 },
+        { id: "sub-4", start: 4 },
+      ],
+    });
+    expect(p(next).clips.map((c) => [c.start, c.duration])).toEqual([
+      [1, 2.5],
+      [4, 2],
+    ]);
+  });
+
+  it("Suppr efface le groupe entier, et les zones sélectionnées s'éteignent", () => {
+    const groupes = state({
+      clips: [sub(1, 2), sub(4, 2), sub(7, 2)],
+      selection: { kind: "clip", ids: ["sub-1", "sub-7"] },
+    });
+    const apres = run(groupes, { type: "deleteSelection" });
+    expect(p(apres).clips.map((c) => c.id)).toEqual(["sub-4"]);
+    expect(apres.selection).toBeNull();
+
+    const zone = (id: string): MaskZone => ({
+      id,
+      label: id,
+      x: 0,
+      y: 0.1,
+      w: 0.4,
+      h: 0.1,
+      enabled: true,
+    });
+    const deuxZones = state({
+      project: { masks: [zone("a"), zone("b"), zone("c")] },
+      selection: { kind: "mask", ids: ["a", "c"] },
+    });
+    const eteintes = run(deuxZones, { type: "deleteSelection" });
+    expect(p(eteintes).masks.map((m) => m.enabled)).toEqual([false, true, false]);
+    expect(p(eteintes).masks).toHaveLength(3);
+  });
+});
+
+describe("bandeau des sous-titres et ancre de la légende", () => {
+  const bande = (y: number): MaskZone => ({
+    id: ZONE_SOUS_TITRES,
+    label: "Sous-titres FR (bas)",
+    x: 0,
+    y,
+    w: 1,
+    h: 0.14,
+    enabled: true,
+  });
+  const avecBande = () => state({ project: { masks: [bande(0.82)] } });
+
+  it("tirer le bandeau vers le haut monte la légende du même écart", () => {
+    const start = avecBande();
+    const ancre = projectPreset(p(start)).yAnchor;
+    const next = run(start, { type: "setMasks", masks: [bande(0.72)] });
+    expect(projectPreset(p(next)).yAnchor).toBeCloseTo(ancre - 0.1, 4);
+  });
+
+  it("régler la légende dans le style fait suivre le bandeau", () => {
+    const start = avecBande();
+    const ancre = projectPreset(p(start)).yAnchor;
+    const monte = run(start, { type: "patch", patch: { overrides: { yAnchor: ancre - 0.05 } } });
+    expect(p(monte).masks[0].y).toBeCloseTo(0.77, 4);
+
+    // Vers le bas, c'est la borne du cadre qui gagne : la zone ne se laisse
+    // pas pousser à moitié hors de l'image, et l'ancre reste celle demandée.
+    const descendu = run(start, { type: "patch", patch: { overrides: { yAnchor: ancre + 0.05 } } });
+    expect(p(descendu).masks[0].y).toBeCloseTo(1 - 0.14, 4);
+    expect(projectPreset(p(descendu)).yAnchor).toBeCloseTo(ancre + 0.05, 4);
+  });
+
+  it("un geste qui change les deux à la fois est respecté tel quel", () => {
+    // Un plan importé, un préréglage appliqué : les deux valeurs viennent du
+    // même choix, les recaler l'une sur l'autre les abîmerait.
+    const start = avecBande();
+    const next = run(start, {
+      type: "patch",
+      patch: { masks: [bande(0.5)], overrides: { yAnchor: 0.2 } },
+    });
+    expect(p(next).masks[0].y).toBe(0.5);
+    expect(projectPreset(p(next)).yAnchor).toBe(0.2);
+  });
+
+  it("une zone qui ne bouge pas verticaement ne touche pas à la légende", () => {
+    const start = avecBande();
+    const ancre = projectPreset(p(start)).yAnchor;
+    const next = run(start, { type: "setMasks", masks: [{ ...bande(0.82), h: 0.2 }] });
+    expect(projectPreset(p(next)).yAnchor).toBeCloseTo(ancre, 6);
   });
 });

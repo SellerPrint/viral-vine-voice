@@ -6,6 +6,7 @@ import { sourceToTimeline } from "@/lib/editor/edl";
 import { EMPTY_PROJECT, projectPreset } from "@/lib/editor/project";
 import {
   createEditorState,
+  selectedClipId,
   derive,
   editorReducer,
   projectOf,
@@ -49,7 +50,10 @@ function EditorProvider({ children }: { children: ReactNode }) {
 
   const derived = useMemo(() => {
     const base = derive(state);
-    const selectedId = state.selection?.kind === "clip" ? state.selection.id : null;
+    // La sélection principale (le premier id) seule dicte ce suivi : sinon
+    // encadrer six blocs d'un coup ferait sauter la tête de lecture de l'un à
+    // l'autre à chaque repaint.
+    const selectedId = selectedClipId(state.selection);
     const cues = clipsToCues(base.subs, {
       wordByWord: project.wordByWord,
       duration: base.sourceDuration,
@@ -208,6 +212,17 @@ function EditorFrame() {
       data-hydrated={hydrated ? "true" : "false"}
     >
       <TopBar />
+
+      {/* Le dépôt d'un fichier est accepté dans toute la fenêtre ; sans
+         confirmation visuelle, personne ne sait qu'il est pris en charge — et
+          c'est précisément ce qui faisait dire « impossible de déposer ». */}
+      {dropping ? (
+        <div className="ed-drop-overlay" role="status">
+          <span className="ed-drop-badge">
+            Dépose le plan ici — il reste dans ton navigateur, rien n'est envoyé
+          </span>
+        </div>
+      ) : null}
 
       <div
         className="ed-main"

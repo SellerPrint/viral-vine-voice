@@ -3,6 +3,11 @@ import { SUBTITLE_PRESETS } from "@/lib/video/presets";
 import { formatClock } from "@/lib/editor/edl";
 import { clampZone } from "@/lib/editor/project";
 import type { InspectorTab } from "@/lib/editor/store";
+import {
+  selectedIds,
+  onlySelection,
+  selectedMaskId as storeSelectedMaskId,
+} from "@/lib/editor/store";
 
 import { Chips, Icon, IconButton, Kv, NumberField, Section, Slider, Switch } from "./ui";
 import { useEditor, useEditorActions } from "./editor-context";
@@ -38,8 +43,17 @@ export function Inspector() {
       ? "project"
       : tab;
 
+  const groupe = selectedIds(state.selection).length;
+
   return (
     <aside className="ed-inspector">
+      {/* Un rappel, pas une niche : plusieurs blocs en main se voient aussi sur
+          la piste, mais c'est ici qu'on lit ce que le geste veut dire. */}
+      {groupe > 1 ? (
+        <p className="ed-note ed-selection-note">
+          {groupe} éléments en main — glisser l'un déplace le groupe, Suppr les efface.
+        </p>
+      ) : null}
       <div className="ed-insp-tabs" role="tablist">
         {TABS.map((item) => (
           <button
@@ -73,7 +87,7 @@ function ClipInspector() {
   const clip = derived.selectedClip;
   const duration = project.source?.duration ?? 0;
 
-  const selectedMaskId = state.selection?.kind === "mask" ? state.selection.id : null;
+  const selectedMaskId = storeSelectedMaskId(state.selection);
   if (selectedMaskId) {
     const zone = project.masks.find((item) => item.id === selectedMaskId);
     if (!zone) return <p className="ed-note">Zone introuvable.</p>;
@@ -281,7 +295,7 @@ function ClipInspector() {
                 start: Math.min(duration - clip.duration, end + 0.02),
               };
               actions.patch({ clips: [...project.clips, copy] });
-              dispatch({ type: "select", selection: { kind: "clip", id: copy.id } });
+              dispatch({ type: "select", selection: onlySelection("clip", copy.id) });
             }}
             title="Dupliquer le bloc juste après"
           >

@@ -1,3 +1,5 @@
+import { useRef } from "react";
+
 import { Link } from "@tanstack/react-router";
 
 import { Icon, IconButton } from "./ui";
@@ -12,6 +14,7 @@ import { useEditor, useEditorActions } from "./editor-context";
  */
 export function TopBar() {
   const { project, derived, ui, dispatch } = useEditor();
+  const fileRef = useRef<HTMLInputElement>(null);
   const actions = useEditorActions();
 
   return (
@@ -67,6 +70,34 @@ export function TopBar() {
       </div>
 
       <div style={{ flex: 1 }} />
+
+      {/* Bouton d'import, et non la seule zone du panneau gauche : ce panneau
+          se replie (et il est replié sur un petit écran), le chemin d'entrée ne
+          doit pas disparaître avec lui. Le glisser-déposer reste accepté
+          partout dans la fenêtre. */}
+      <button
+        type="button"
+        className="ed-btn"
+        onClick={() => fileRef.current?.click()}
+        title="Importer un plan depuis ton disque — ou dépose-le n'importe où dans la fenêtre"
+      >
+        <Icon name="upload" size={13} />
+        <span className="ed-btn-label">Importer un plan</span>
+      </button>
+      <input
+        ref={fileRef}
+        id="ed-import-plan"
+        type="file"
+        accept="video/*"
+        className="sr-only"
+        style={{ position: "absolute", width: 1, height: 1, opacity: 0 }}
+        aria-label="Importer un plan"
+        onChange={(event) => {
+          const file = event.target.files?.[0];
+          event.target.value = "";
+          if (file) void actions.importFile(file);
+        }}
+      />
 
       {/* Volets : « tout est petit » se règle d'abord en rendant de la place au
           plan, avant de grossir les contrôles. */}
