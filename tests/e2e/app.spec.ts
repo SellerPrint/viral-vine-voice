@@ -12,6 +12,30 @@ import { expect, test } from "@playwright/test";
 
 const CLIP = fileURLToPath(new URL("./fixtures/clip.mp4", import.meta.url));
 
+/**
+ * Le monteur doit être hydraté avant toute interaction avec un champ : un
+ * `change` envoyé sur un input pas encore branché ne déclenche rien, et le test
+ * échoue pour une raison extérieure à l'application.
+ */
+async function expectHydrated(page: import("@playwright/test").Page) {
+  await expect(page.locator('.ed-root[data-hydrated="true"]')).toBeVisible({ timeout: 30_000 });
+}
+
+/**
+ * Attend que ce soit bien le fichier importé qui tienne la scène, et non le
+ * plan de démonstration chargé au premier lancement.
+ *
+ * « un clip visible sur la piste vidéo » ne prouve rien : la démo y pose le
+ * sien, donc le test continuait sur la démo et le plan importé arrivait
+ * écraser les blocs ajoutés entre-temps (six cues de la démo + un, puis
+ * zéro). L'identité du plan est le seul signal sans ambiguïté.
+ */
+async function expectImportedClip(page: import("@playwright/test").Page) {
+  await expect(page.locator(".ed-project-name")).toHaveValue("clip", { timeout: 30_000 });
+  await expect(page.locator('[data-lane="video"] .ed-clip')).toHaveCount(1);
+  await expect(page.locator(".ed-topbar")).toContainText("clip.mp4");
+}
+
 test("la page se charge sans erreur de console", async ({ page }) => {
   const errors: string[] = [];
   page.on("console", (message) => {
@@ -83,9 +107,11 @@ test("un fichier trop lourd est refusé avec un message explicite", async ({ pag
   // deja fait depasser le delai par defaut sur une machine chargee.
   test.slow();
 
-  // `networkidle` : sans hydratation terminee, le gestionnaire React n'est pas
-  // encore attache au champ et l'evenement `change` part dans le vide.
-  await page.goto("/", { waitUntil: "networkidle" });
+  // Le monteur s'hydrate puis charge la démo ; `networkidle` est inutilisable
+  // ici (l'atelier décode des vignettes en continu). On attend donc le marqueur
+  // d'hydratation posé par l'application elle-même.
+  await page.goto("/", { waitUntil: "domcontentloaded" });
+  await expectHydrated(page);
 
   const input = page.locator('input[type="file"]');
   await expect(input).toBeAttached();
@@ -109,19 +135,188 @@ test("un fichier trop lourd est refusé avec un message explicite", async ({ pag
     input.dispatchEvent(new Event("change", { bubbles: true }));
   });
 
-  await expect(page.getByText(/trop lourd/i)).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTestId("notice")).toContainText(/trop lourd/i, { timeout: 30_000 });
 });
 
-test("une vidéo valide est acceptée et ouvre les réglages", async ({ page }) => {
-  await page.goto("/", { waitUntil: "networkidle" });
+test("un plan importé entre dans le monteur", async ({ page }) => {
+  await page.goto("/", { waitUntil: "domcontentloaded" });
+  await expectHydrated(page);
 
-  // Vraie vidéo H.264 : un buffer vide était rejeté au décodage, et le
-  // panneau ne s'ouvrait jamais.
+  // Vraie vidéo H.264 : un buffer vide était rejeté au décodage, et la piste
+  // restait vide sans qu'aucun message ne l'explique.
   await page.locator('input[type="file"]').setInputFiles(CLIP);
 
-  // Le panneau de réglages n'apparaît qu'une fois la vidéo importée : c'est
-  // ce montage tardif qui avait empêché le widget Turnstile de se rendre.
-  await expect(page.getByText(/Sous-titres FR/i)).toBeVisible({ timeout: 30_000 });
+  // Le plan atterrit sur la piste vidéo, mesuré et non plus seulement « accepté » :
+  // la durée et les dimensions viennent du décodage navigateur.
+  await expectImportedClip(page);
+});
+
+test("« Doublage IA » ouvre la boîte sur l'onglet du doublage", async ({ page }) => {
+  await page.goto("/", { waitUntil: "domcontentloaded" });
+  await expectHydrated(page);
+
+  // Les deux CTA de la barre supérieure ouvrent la même boîte, mais pas le
+  // même onglet : cliquer « Doublage IA » pour voir « Lancer le rendu local »
+  // faisait lancer un encodage sans voix en croyant lancer le doublage.
+  await page.getByRole("button", { name: "Doublage IA" }).click();
+  const dialog = page.locator(".ed-modal");
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "Lancer le doublage" })).toBeVisible();
+  await expect(dialog).toContainText("Doublage en");
+
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Exporter" }).click();
+  await expect(dialog.getByRole("button", { name: "Lancer le rendu local" })).toBeVisible();
+});
+
+test("une server function refuse un appel venu d'un autre site", async ({ page }) => {
+  test.skip(Boolean(process.env.E2E_BASE_URL), "chemin source réservé au serveur de développement");
+
+  await page.goto("/", { waitUntil: "domcontentloaded" });
+  await expectHydrated(page);
+
+  // On capture l'appel réellement émis par l'application, puis on le rejoue tel
+  // quel en ne changeant que son origine. C'est exactement la distinction que
+  // fait `createCsrfMiddleware` : avant son câblage, les trois variantes
+  // atteignaient le handler — et un appel de transcription qui aboutit se
+  // facture, même si l'attaquant ne peut pas lire la réponse.
+  type Captured = { url: string; body: string | null; headers: Record<string, string> };
+  const capture = new Promise<Captured>((resolve) => {
+    page.on("request", (request) => {
+      if (request.url().includes("_serverFn")) {
+        resolve({ url: request.url(), body: request.postData(), headers: request.headers() });
+      }
+    });
+  });
+
+  await page.evaluate(async () => {
+    // Le serveur de développement sert les modules à leur chemin source : cet
+    // import n'existe que là, d'où le `test.skip` plus haut. L'identifiant passe
+    // par une variable pour que TypeScript ne cherche pas à le résoudre.
+    const specifier = "/src/lib/ai.functions.ts";
+    const mod = (await import(specifier)) as unknown as {
+      translateSegments: (input: { data: unknown }) => Promise<unknown>;
+    };
+    try {
+      await mod.translateSegments({
+        data: {
+          segments: [{ text: "bonjour", start: 0, end: 1 }],
+          sourceLanguage: "Français",
+          targetLanguage: "Anglais",
+        },
+      });
+    } catch {
+      // Sans clé de traduction, le handler répond son message métier : c'est
+      // justement la preuve que la requête est allée jusqu'à lui.
+    }
+  });
+
+  const captured = await Promise.race([
+    capture,
+    page.waitForTimeout(15_000).then(() => {
+      throw new Error("aucun appel de server function n'a été capté dans ce délai");
+    }),
+  ]);
+
+  // En-têtes interdits par le client HTTP de Playwright.
+  const forbidden = new Set(["host", "connection", "content-length"]);
+  const headers: Record<string, string> = {};
+  for (const [key, value] of Object.entries(captured.headers)) {
+    if (!forbidden.has(key.toLowerCase())) headers[key] = value;
+  }
+  const replay = (extra: Record<string, string>) =>
+    page.request.fetch(captured.url, {
+      method: "POST",
+      data: captured.body,
+      headers: { ...headers, ...extra },
+    });
+
+  const legit = await replay({});
+  expect(legit.status()).toBe(200);
+  expect(await legit.text()).toContain("Clé API de traduction manquante");
+
+  const attaques: Array<Record<string, string>> = [
+    { origin: "https://attaquant.example" },
+    { "sec-fetch-site": "cross-site" },
+    { referer: "https://attaquant.example/" },
+  ];
+  for (const extra of attaques) {
+    const refused = await replay(extra);
+    expect(refused.status(), `en-têtes ${JSON.stringify(extra)}`).toBe(403);
+  }
+});
+
+test("la timeline se manipule : sélection, déplacement, annulation", async ({ page }) => {
+  await page.goto("/", { waitUntil: "domcontentloaded" });
+  await expectHydrated(page);
+  // La démo est déjà chargée au premier lancement : on repart d'un projet vide
+  // pour que le compte des blocs vienne bien du clic sur le bouton.
+  await page.locator('button[title^="Nouveau projet"]').click();
+  await page.getByRole("button", { name: "Ouvrir la démo", exact: false }).click();
+
+  // Le plan de démonstration pose six blocs de sous-titres : ils servent de
+  // support aux gestes, sans dépendre d'un import ni d'une clé API.
+  const blocks = page.locator('[data-lane="subs"] .ed-clip');
+  await expect(blocks).toHaveCount(6, { timeout: 20_000 });
+
+  const block = blocks.first();
+  const before = await block.boundingBox();
+  await expect(before).not.toBeNull();
+
+  await page.mouse.move(before!.x + before!.width / 2, before!.y + before!.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(before!.x + before!.width / 2 + 120, before!.y + before!.height / 2, {
+    steps: 8,
+  });
+  await page.mouse.up();
+
+  const moved = await block.boundingBox();
+  // Un geste de 120 px doit déplacer le bloc d'environ 120 px : ni trois fois
+  // la distance (delta cumulé à chaque image), ni rien du tout.
+  expect(Math.abs(moved!.x - before!.x - 120)).toBeLessThan(12);
+
+  await page.keyboard.press("Control+z");
+  const restored = await block.boundingBox();
+  expect(Math.abs(restored!.x - before!.x)).toBeLessThan(2);
+});
+
+test("le rendu local incruste la timeline et rend un fichier", async ({ page }) => {
+  test.slow();
+
+  await page.goto("/", { waitUntil: "domcontentloaded" });
+  await expectHydrated(page);
+  await page.locator('input[type="file"]').setInputFiles(CLIP);
+  await expectImportedClip(page);
+  // Le compte des cues part de zéro : posé sur la démo, le « c » suivant aurait
+  // ajouté un septième bloc à un plan qui allait être remplacé.
+  await expect(page.locator('[data-lane="subs"] .ed-clip')).toHaveCount(0);
+
+  // Un sous-titre posé depuis le clavier, pour vérifier que le montage est bien
+  // celui affiché et pas la seule source recopiée.
+  await page.keyboard.press("c");
+  await expect(page.locator('[data-lane="subs"] .ed-clip')).toHaveCount(1);
+
+  await page.keyboard.press("Control+e");
+  await page.getByRole("button", { name: "Lancer le rendu local" }).click();
+
+  await expect(page.locator(".ed-modal video")).toBeVisible({ timeout: 180_000 });
+  await expect(page.getByRole("link", { name: /Télécharger le MP4/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Afficher dans la scène/ })).toBeVisible();
+
+  // Le fichier annoncé est bien une vidéo décodable de la même durée que le
+  // montage : le moteur a pu dégrader le graphe, jamais inventer un conteneur.
+  const meta = await page.locator(".ed-modal video").evaluate((video) => {
+    const element = video as HTMLVideoElement;
+    return {
+      width: element.videoWidth,
+      height: element.videoHeight,
+      duration: element.duration,
+    };
+  });
+  expect(meta.width).toBeGreaterThan(0);
+  expect(meta.duration).toBeGreaterThan(0.5);
 });
 
 test("la page est isolée cross-origin (SharedArrayBuffer disponible)", async ({ page }) => {

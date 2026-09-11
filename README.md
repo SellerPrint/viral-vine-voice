@@ -1,8 +1,8 @@
 # ViralDub 🎬
 
-> Transforme tes TikToks français en vidéos anglaises prêtes à publier — **sans que ta vidéo quitte ton navigateur**.
+> Transforme tes TikToks en vidéos doublées prêtes à publier — **sans que ta vidéo quitte ton navigateur**.
 
-Upload un MP4 français, récupère la même vidéo avec voix off anglaise, sous-titres incrustés style CapCut, silences coupés et bandeau de sous-titres d'origine masqué.
+Un **monteur** complet dans l'onglet : timeline manipulable (glisser, rogner, couper à la tête de lecture, annuler), zones à flouter saisies à la souris, sous-titres éditables bloc par bloc — et le doublage IA (transcription, traduction, voix off) comme une étape de plus dans ce montage, pas comme un formulaire à part.
 
 ![Statut](https://img.shields.io/badge/statut-prototype-orange)
 ![Licence](https://img.shields.io/badge/licence-MIT-blue)
@@ -24,6 +24,9 @@ Tout le traitement vidéo tourne **dans ton navigateur** via `ffmpeg.wasm`. Ton 
 - ✂️ **Coupe automatique des silences** — détection RMS, seuil 400 ms
 - 🖼️ **Masquage de zones** — détection automatique du bandeau de sous-titres FR et des logos
 - 🪞 **Effet miroir** — pour contourner la détection de doublons des plateformes
+- 🎬 **Monteur type logiciel desktop** — timeline multi-pistes (plan, coupes, sous-titres, voix off), vignettes décodées du plan, règle graduée, aimantation, zoom molette, raccourcis `Espace` `J/K/L` `S` `Suppr` `Ctrl+Z`
+- 🖱️ **Manipulation directe** — un sous-titre se déplace à la souris, un flou se redimensionne dans l'aperçu, un style se glisse depuis la bibliothèque sur la piste
+- 🔁 **Deux chemins d'export** — rendu local (aucun appel réseau, ré-encode la timeline telle quelle) ou doublage complet ; les pistes générées par l'IA reviennent ensuite dans le monteur, corrigeables
 
 ---
 
@@ -34,7 +37,7 @@ Tout le traitement vidéo tourne **dans ton navigateur** via `ffmpeg.wasm`. Ton 
 | Framework   | [TanStack Start](https://tanstack.com/start) (SSR) + React 19 |
 | Build       | Vite 8 · Tailwind CSS 4 · shadcn/ui                           |
 | Vidéo       | `ffmpeg.wasm` (navigateur)                                    |
-| Déploiement | Cloudflare Workers (Nitro)                                    |
+| Déploiement | Cloudflare Workers (par défaut) · Vercel (auto)               |
 | IA          | ElevenLabs · Google Gemini · ai33.pro                         |
 
 ---
@@ -93,7 +96,8 @@ bun run check       # typecheck + lint + test
 ```
 NAVIGATEUR                                    SERVEUR (Workers)
 ──────────────────────────────                ─────────────────────────
-1. Upload MP4 (max 60 Mo)
+1. Import du plan (max 60 Mo) dans le monteur
+   vignettes + forme d'onde + durée mesurées localement
 2. Extraction audio (ffmpeg.wasm)  ────────►  transcribeAudio
                                               └─► ElevenLabs Scribe v2
                                                   mots + timestamps + locuteurs
@@ -110,23 +114,76 @@ NAVIGATEUR                                    SERVEUR (Workers)
                                                   audio base64
 
 7. Mixage (Web Audio API)
-8. Rendu final (ffmpeg.wasm)
-   masques + sous-titres + coupes
+8. Rendu final (ffmpeg.wasm)     ◄── même graphe pour un
+   masques + sous-titres + coupes     rendu local sans IA
    + miroir + mixage audio
-
-9. Téléchargement MP4
+9. Les phrases traduites et les coupes Propositions de la machine
+   reviennent sur la timeline           posées sur les pistes,
+10. Ajustement à la souris, puis        validées une à une
+    téléchargement MP4
 ```
+
+---
+
+## Déploiement
+
+Le build vise Cloudflare Workers, mais **Vercel marche sans configuration** :
+Nitro détecte la plateforme à partir de son environnement. Vérifié ici même —
+avec seulement `VERCEL=1` dans le shell, `npm run build` produit
+`.vercel/output` avec `preset: vercel`, une fonction unique `__server`
+(`nodejs20.x`) et les 44 Mo de statiques (cœurs WebAssembly, polices, démo).
+
+1. **Manager de paquets** : laisser Bun, que Vercel déduit de `bun.lock`. Un
+   `npm install` se casse en `ERESOLVE` (conflit de paires entre `eslint@10`
+   et `eslint-plugin-react-hooks@5`) ; il lui faut `--legacy-peer-deps`.
+2. **Commande de build** : `npm run build`, telle quelle. Elle enchaîne
+   `vite build` puis `scripts/apply-vercel-max-duration.mjs` (voir point 4).
+3. **Variables d'environnement** : `ELEVENLABS_API_KEY` et une clé de
+   traduction (`GEMINI_API_KEY` par défaut) sont requises pour le doublage ;
+   `TURNSTILE_SECRET_KEY` + `VITE_TURNSTILE_SITE_KEY` le sont aussi, car
+   `guard.server.ts` **refuse les appels IA en production sans Turnstile** —
+   sans lui, l'API devient un proxy ElevenLabs gratuit pour n'importe qui.
+   Sans ces clés, l'interface reste utilisable : le rendu local, la timeline
+   et les masques ne touchent pas le réseau, et un lancement de doublage
+   répond une phrase explicite plutôt qu'un échec muet.
+4. **Durée de fonction** : le plafond par défaut de Vercel est de 10 s en
+   Hobby, et `transcribeAudio` comme `translateSegments` sont **une seule
+   requête** chacun (toute la piste audio, puis tous les segments). Le script
+   d'après-build écrit donc `maxDuration: 60` dans le `.vc-config.json` généré
+   — ni `nitro.config.ts` ni `functions.maxDuration` de `vercel.json` ne sont
+   lus ici : le wrapper Vite n'expose que `preset`/`output`/`cloudflare`, et
+   la Build Output API ne retient que ce qu'elle trouve dans `.vercel/output`.
+   Au-delà (source de quelques minutes, ou Pro/Enterprise jusqu'à 300 s),
+   régler `VERCEL_MAX_DURATION=<secondes>`.
+5. **Budget et cache partagés** : `KV_REST_API_URL` + `KV_REST_API_TOKEN`
+   (Upstash ou Vercel KV) sont optionnels, mais sans eux le plafond
+   `TTS_DAILY_CHAR_BUDGET` et le cache de traduction ne vivent que dans la
+   mémoire d'une instance — donc pas entre les fonctions cold-démarrées.
+   `npm run check:kv` valide la connexion, `/api/health` dit lequel est actif.
+6. **Appels serveur** : les server functions sont gardées par
+   `createCsrfMiddleware` (`src/start.ts`) — un `POST /_serverFn/…` venant
+   d'une autre origine reçoit un 403 avant d'atteindre le handler, ce qui
+   empêche une page tierce de faire dépenser la clef ElevenLabs depuis le
+   navigateur d'un visiteur. Le test e2e « une server function refuse un appel
+   venu d'un autre site » le vérifie. En face, `guard.server.ts` ajoute
+   Turnstile, la limitation de débit et le plafond de caractères par 24 h.
+7. **Après le premier déploiement**, contrôler les en-têtes réellement servis
+   (la CSP a déjà cassé Turnstile et `ffmpeg.wasm` par le passé) :
+   `E2E_BASE_URL=https://… npx playwright test -g "en-têtes"`. Le cas est
+   sauté en local parce que seul un déploiement réel applique `vercel.json`.
 
 ---
 
 ## Limites connues
 
-| Limite                              | Raison                                                 |
-| ----------------------------------- | ------------------------------------------------------ |
-| Vidéos ≤ 60 Mo                      | Contrainte mémoire de `ffmpeg.wasm` dans le navigateur |
-| Langue source : français uniquement | Codée en dur dans le prompt et l'appel STT             |
-| Rendu lent sur mobile               | WASM monothread ; ~1 à 3 min pour 60 s de vidéo        |
-| Nécessite un navigateur récent      | WebAssembly, Web Audio API, SharedArrayBuffer          |
+| Limite                                          | Raison                                                                  |
+| ----------------------------------------------- | ----------------------------------------------------------------------- |
+| Vidéos ≤ 60 Mo                                  | Contrainte mémoire de `ffmpeg.wasm` dans le navigateur                  |
+| Langue source : 7 langues                       | Liste bornée côté serveur (ISO 639-3 pour Scribe)                       |
+| Piste de voix off non ré-encodée au rendu local | Le mixage vient du doublage complet, seul chemin qui synthétise la voix |
+| 4 zones de masquage maximum                     | Chaque zone ajoute `crop` + `boxblur` + `overlay` au graphe             |
+| Rendu lent sur mobile                           | WASM monothread ; ~1 à 3 min pour 60 s de vidéo                         |
+| Nécessite un navigateur récent                  | WebAssembly, Web Audio API, SharedArrayBuffer                           |
 
 ---
 
