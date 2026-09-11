@@ -1,0 +1,362 @@
+import { describe, expect, it } from "vitest";
+
+import { EMPTY_PROJECT, makeClip } from "./project";
+import { createEditorState, editorReducer, MIN_CLIP, type Action, type EditorState } from "./store";
+import type { Clip, Project, SourceMedia } from "./types";
+
+/**
+ * Les gestes du monteur, testés sans navigateur.
+ *
+ * Chaque cas correspond à une façon bien précise de casser un montage : un trim
+ * qui inverse le clip, une coupe qui dépasse la fin du média, un glisser qui
+ * avale le voisin, un annuler qui annule trois gestes d'un coup.
+ */
+
+const source: SourceMedia = {
+  name: "clip.mp4",
+  url: "blob:local/clip",
+  bytes: null,
+  size: 1024,
+  duration: 10,
+  width: 540,
+  height: 960,
+  fps: 30,
+  hasAudio: true,
+};
+
+const sub = (start: number, duration: number, text = "texte"): Clip => ({
+  id: `sub-${start}`,
+  track: "subs",
+  start,
+  duration,
+  text,
+  label: text,
+});
+
+function state(patches: {
+  clips?: Clip[];
+  project?: Partial<Project>;
+  ui?: Partial<EditorState["ui"]>;
+  selection?: EditorState["selection"];
+}): EditorState {
+  const project: Project = {
+    ...EMPTY_PROJECT,
+    source,
+    masks: [],
+    clips: patches.clips ?? [],
+    ...patches.project,
+  };
+  const base = createEditorState(project);
+  return {
+    ...base,
+    selection: patches.selection ?? null,
+    ui: { ...base.ui, ...patches.ui },
+  };
+}
+
+/** L'état de montage n'est jamais lu directement : il vit dans la pile. */
+const p = (state: EditorState): Project => state.hist.present;
+
+/** Plage d'un bloc au début du geste, comme le fait la timeline. */
+const rangeOf = (project: Project, id: string) => {
+  const clip = project.clips.find((c) => c.id === id)!;
+  return { start: clip.start, end: clip.start + clip.duration };
+};
+
+const run = (state: EditorState, ...actions: Action[]) =>
+  actions.reduce((current, action) => editorReducer(current, action), state);
+
+describe("dragClip", () => {
+  it("déplace un bloc en gardant sa durée", () => {
+    const start = state({ clips: [sub(2, 2)], ui: { snap: false, zoom: 46 } });
+    const next = run(start, {
+      type: "dragClip",
+      id: "sub-2",
+      delta: 1.5,
+      mode: "move",
+      origin: rangeOf(p(start), "sub-2"),
+    });
+    expect(p(next).clips[0]).toMatchObject({ start: 3.5, duration: 2 });
+  });
+
+  it("bute en fin de média plutôt que de sortir du plan", () => {
+    const start = state({ clips: [sub(8, 2)], ui: { snap: false, zoom: 46 } });
+    const next = run(start, {
+      type: "dragClip",
+      id: "sub-8",
+      delta: 6,
+      mode: "move",
+      origin: rangeOf(p(start), "sub-8"),
+    });
+    expect(p(next).clips[0].start).toBe(8);
+    expect(p(next).clips[0].start + p(next).clips[0].duration).toBeLessThanOrEqual(10);
+  });
+
+  it("pousse le voisin immédiat, comme un insert", () => {
+    const start = state({
+      clips: [sub(0, 2), sub(3, 2)],
+      ui: { snap: false, zoom: 46 },
+    });
+    const next = run(start, {
+      type: "dragClip",
+      id: "sub-0",
+      delta: 2.5,
+      mode: "move",
+      origin: rangeOf(p(start), "sub-0"),
+    });
+    const [moved, pushed] = [...p(next).clips].sort((a, b) => a.start - b.start);
+    expect(moved.start).toBe(2.5);
+    expect(pushed.start).toBeGreaterThan(moved.start + moved.duration);
+  });
+
+  it("applique le delta depuis l'origine du geste, jamais en cumul", () => {
+    // Deux événements de 0,5 puis 1,0 px·s⁻1 depuis l'appui doivent poser le
+    // bloc à +1,0 s — pas à +1,5 s. Le geste est défini par la position du
+    // curseur, pas par la somme des mouvements.
+    const start = state({ clips: [sub(2, 2)], ui: { snap: false, zoom: 46 } });
+    const next = run(
+      start,
+      {
+        type: "dragClip",
+        id: "sub-2",
+        delta: 0.5,
+        mode: "move",
+        origin: rangeOf(p(start), "sub-2"),
+      },
+      {
+        type: "dragClip",
+        id: "sub-2",
+        delta: 1,
+        mode: "move",
+        origin: rangeOf(p(start), "sub-2"),
+      },
+    );
+    expect(p(next).clips[0].start).toBe(3);
+  });
+
+  it("aimante le bord sur la tête de lecture", () => {
+    // À 46 px/s, la tolérance vaut ~0,17 s : 5,9 s doit coller à 6 s.
+    const start = state({ clips: [sub(2, 2)], ui: { snap: true, zoom: 46, playhead: 6 } });
+    const next = run(start, {
+      type: "dragClip",
+      id: "sub-2",
+      delta: 3.9,
+      mode: "move",
+      origin: rangeOf(p(start), "sub-2"),
+    });
+    expect(p(next).clips[0].start).toBe(6);
+  });
+
+  it("un trim tiré trop loin ne retourne pas le bloc", () => {
+    const start = state({ clips: [sub(4, 2)], ui: { snap: false, zoom: 46 } });
+    const next = run(start, {
+      type: "dragClip",
+      id: "sub-4",
+      delta: -9,
+      mode: "trim-right",
+      origin: rangeOf(p(start), "sub-4"),
+    });
+    const clip = p(next).clips[0];
+    expect(clip.duration).toBeGreaterThanOrEqual(MIN_CLIP);
+    expect(clip.start + clip.duration).toBeGreaterThan(clip.start);
+  });
+
+  it("le trim gauche garde la fin du bloc immobile", () => {
+    const start = state({ clips: [sub(2, 4)], ui: { snap: false, zoom: 46 } });
+    const next = run(start, {
+      type: "dragClip",
+      id: "sub-2",
+      delta: 0.8,
+      mode: "trim-left",
+      origin: rangeOf(p(start), "sub-2"),
+    });
+    const clip = p(next).clips[0];
+    expect(clip.start).toBeCloseTo(2.8, 2);
+    expect(clip.start + clip.duration).toBeCloseTo(6, 2);
+  });
+
+  it("un glisser continu ne crée qu'une seule entrée d'annulation", () => {
+    const start = state({ clips: [sub(2, 2)], ui: { snap: false, zoom: 46 } });
+    const dragged = run(
+      start,
+      {
+        type: "dragClip",
+        id: "sub-2",
+        delta: 0.4,
+        mode: "move",
+        origin: rangeOf(p(start), "sub-2"),
+      },
+      {
+        type: "dragClip",
+        id: "sub-2",
+        delta: 0.9,
+        mode: "move",
+        origin: rangeOf(p(start), "sub-2"),
+      },
+      {
+        type: "dragClip",
+        id: "sub-2",
+        delta: 1.4,
+        mode: "move",
+        origin: rangeOf(p(start), "sub-2"),
+      },
+    );
+    expect(dragged.hist.past).toHaveLength(1);
+    const undone = run(dragged, { type: "undo" });
+    expect(p(undone).clips[0].start).toBe(2);
+  });
+});
+
+describe("splitAtPlayhead", () => {
+  it("partage le bloc sélectionné et sélectionne la seconde moitié", () => {
+    const clip = sub(0, 4, "une phrase");
+    const start = state({
+      clips: [clip],
+      ui: { playhead: 1.5 },
+      selection: { kind: "clip", id: clip.id },
+    });
+    const next = run(start, { type: "splitAtPlayhead" });
+    expect(p(next).clips).toHaveLength(2);
+    expect(
+      p(next)
+        .clips.map((c) => c.duration)
+        .sort(),
+    ).toEqual([1.5, 2.5]);
+    expect(p(next).clips.every((c) => c.text === "une phrase")).toBe(true);
+    expect(next.selection).toEqual({ kind: "clip", id: p(next).clips[1].id });
+  });
+
+  it("ne coupe pas à moins d'un fragment exploitable du bord", () => {
+    const clip = sub(0, 4, "une phrase");
+    const start = state({
+      clips: [clip],
+      ui: { playhead: 0.05 },
+      selection: { kind: "clip", id: clip.id },
+    });
+    expect(p(run(start, { type: "splitAtPlayhead" })).clips).toHaveLength(1);
+  });
+
+  it("à défaut de sélection, coupe le bloc sous la tête de lecture", () => {
+    const start = state({ clips: [sub(0, 4, "a"), sub(5, 4, "b")], ui: { playhead: 6 } });
+    const next = run(start, { type: "splitAtPlayhead" });
+    expect(p(next).clips).toHaveLength(3);
+    expect(p(next).clips.filter((c) => c.text === "b")).toHaveLength(2);
+  });
+
+  it("ne fait rien si la tête de lecture ne touche aucun bloc", () => {
+    const start = state({ clips: [sub(0, 1, "a")], ui: { playhead: 8 } });
+    expect(p(run(start, { type: "splitAtPlayhead" })).clips).toHaveLength(1);
+  });
+});
+
+describe("blocs et coupes", () => {
+  it("ajoute un sous-titre à la tête de lecture et le sélectionne", () => {
+    const next = run(state({ ui: { playhead: 3 } }), { type: "addCueAtPlayhead" });
+    expect(p(next).clips[0]).toMatchObject({ track: "subs", start: 3, duration: 2 });
+    expect(next.selection).toEqual({ kind: "clip", id: p(next).clips[0].id });
+  });
+
+  it("rogné le bloc ajouté près de la fin au lieu de le laisser déborder", () => {
+    const next = run(state({ ui: { playhead: 9.4 } }), { type: "addCueAtPlayhead" });
+    const clip = p(next).clips[0];
+    expect(clip.start).toBeCloseTo(9.4, 2);
+    expect(clip.duration).toBeLessThanOrEqual(0.6 + 1e-6);
+  });
+
+  it("une coupe marque une plage retirée, pas un segment supprimé", () => {
+    const next = run(state({ ui: { playhead: 2 } }), { type: "addCutAtPlayhead", seconds: 0.5 });
+    expect(p(next).clips[0]).toMatchObject({ track: "cuts", start: 2, duration: 0.5 });
+  });
+
+  it("supprime le bloc sélectionné et rend la sélection", () => {
+    const clip = sub(1, 2);
+    const next = run(state({ clips: [clip], selection: { kind: "clip", id: clip.id } }), {
+      type: "deleteSelection",
+    });
+    expect(p(next).clips).toHaveLength(0);
+    expect(next.selection).toBeNull();
+  });
+
+  it("une zone masquante se désactive plutôt que de disparaître", () => {
+    const base = state({ clips: [] });
+    const withMask = run(base, { type: "addMask" });
+    const id = p(withMask).masks[0].id;
+    expect(p(withMask).masks[0].enabled).toBe(true);
+    const off = run({ ...withMask, selection: { kind: "mask", id } }, { type: "deleteSelection" });
+    expect(p(off).masks).toHaveLength(1);
+    expect(p(off).masks[0].enabled).toBe(false);
+  });
+});
+
+describe("nudge, seek, annulation", () => {
+  it("décale le bloc sélectionné image par image", () => {
+    const clip = sub(2, 1);
+    const next = run(state({ clips: [clip], selection: { kind: "clip", id: clip.id } }), {
+      type: "nudgeSelection",
+      seconds: 1 / 30,
+    });
+    expect(p(next).clips[0].start).toBeCloseTo(2 + 1 / 30, 3);
+  });
+
+  it("refuse de sortir du média", () => {
+    const clip = sub(9.6, 1);
+    const next = run(state({ clips: [clip], selection: { kind: "clip", id: clip.id } }), {
+      type: "nudgeSelection",
+      seconds: 2,
+    });
+    expect(p(next).clips[0].start).toBe(9);
+  });
+
+  it("borne la tête de lecture à la durée du plan", () => {
+    const next = run(state({}), { type: "seek", time: 99 });
+    expect(next.ui.playhead).toBe(10);
+    expect(run(state({}), { type: "seek", time: -4 }).ui.playhead).toBe(0);
+  });
+
+  it("annuler puis rétablir revient à l'état courant", () => {
+    const start = state({ clips: [sub(1, 1)] });
+    const edited = run(start, { type: "addCueAtPlayhead" }, { type: "addCueAtPlayhead" });
+    expect(p(edited).clips).toHaveLength(3);
+    const undone = run(edited, { type: "undo" }, { type: "undo" });
+    expect(p(undone).clips).toHaveLength(1);
+    const redone = run(undone, { type: "redo" }, { type: "redo" });
+    expect(p(redone).clips).toHaveLength(3);
+  });
+
+  it("le chargement d'un nouveau plan vide la pile", () => {
+    const edited = run(state({ clips: [sub(1, 1)] }), { type: "addCueAtPlayhead" });
+    const loaded = run(edited, { type: "loadProject", project: { ...EMPTY_PROJECT, source } });
+    expect(loaded.hist.past).toHaveLength(0);
+    expect(loaded.ui.playhead).toBe(0);
+    expect(p(loaded).clips).toHaveLength(0);
+  });
+});
+
+describe("setMasks", () => {
+  it("un glisser de zone répété ne crée qu'une entrée d'historique", () => {
+    const base = run(state({}), { type: "addMask" });
+    const id = p(base).masks[0].id;
+    const dragged = run(base, { type: "select", selection: { kind: "mask", id } });
+    const merged = run(
+      dragged,
+      { type: "setMasks", masks: [{ ...p(dragged).masks[0], x: 0.3 }], mergeKey: `mask:${id}` },
+      { type: "setMasks", masks: [{ ...p(dragged).masks[0], x: 0.35 }], mergeKey: `mask:${id}` },
+    );
+    expect(merged.hist.past).toHaveLength(dragged.hist.past.length + 1);
+    expect(p(merged).masks[0].x).toBe(0.35);
+  });
+});
+
+describe("makeClip", () => {
+  it("borne une durée nulle à une durée saisissable", () => {
+    const clip = makeClip("subs", { start: 1, end: 1 }, { text: "x" });
+    expect(clip.duration).toBeGreaterThan(0);
+    expect(clip.label).toBe("x");
+  });
+
+  it("normalise une plage inversée", () => {
+    const clip = makeClip("cuts", { start: 5, end: 2 });
+    expect(clip.start).toBe(2);
+    expect(clip.duration).toBe(3);
+  });
+});

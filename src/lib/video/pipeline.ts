@@ -27,6 +27,21 @@ export type PipelineResult = {
   segments: Segment[];
   /** Dégradations et échecs partiels à signaler à l'utilisateur. */
   warnings: string[];
+  /**
+   * Plages de silence effectivement retirées du montage.
+   *
+   * Le monteur en a besoin pour les matérialiser sur sa piste de coupes : sans
+   * elles, la décision de la machine reste invisible et donc incorrigible.
+   */
+  silenceCuts: { start: number; end: number }[];
+  /**
+   * WAV de la voix off complète, quand elle a pu être générée.
+   *
+   * Sert à afficher la forme d'onde du doublage et à l'écouter avant export.
+   */
+  narrationWav: Uint8Array | null;
+  /** Cadence et dimensions mesurées sur la source, utiles au monteur. */
+  probe: { duration: number; width: number; height: number; fps: number; hasAudio: boolean };
 };
 
 export async function readFileBytes(file: File): Promise<Uint8Array> {
@@ -280,6 +295,15 @@ export async function runPipeline(
       videoBlob: new Blob([exactArrayBuffer(outcome.bytes)], { type: "video/mp4" }),
       segments,
       warnings,
+      silenceCuts: cutList.map((cut) => ({ start: cut.start, end: cut.end })),
+      narrationWav: voiceWav,
+      probe: {
+        duration,
+        width: videoWidth,
+        height: videoHeight,
+        fps: sourceFps,
+        hasAudio: sourceHasAudio,
+      },
     };
   } finally {
     for (const name of cleanupNames) {
