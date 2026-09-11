@@ -102,11 +102,17 @@ function ClipInspector() {
                 onChange={(value) =>
                   dispatch({
                     type: "setMasks",
-                    masks: project.masks.map((item) =>
-                      item.id === zone.id
-                        ? clampZone({ ...item, [key]: Math.max(0.02, value / 100) })
-                        : item,
-                    ),
+                    masks: project.masks.map((item) => {
+                      if (item.id !== zone.id) return item;
+                      // Un plancher de taille ne doit pas interdire une
+                      // position : coller une zone au bord (0 %) la faisait
+                      // sauter à 2 %, et le curseur refusait de la ramener.
+                      const next =
+                        key === "w" || key === "h"
+                          ? Math.max(0.02, value / 100)
+                          : Math.max(0, Math.min(1, value / 100));
+                      return clampZone({ ...item, [key]: next });
+                    }),
                     mergeKey: `mask-field:${zone.id}:${key}`,
                   })
                 }
@@ -457,6 +463,22 @@ function ProjectInspector() {
           <Icon name="download" size={13} />
           Ouvrir l'export
         </button>
+      </Section>
+
+      <Section title="Interface">
+        <Chips
+          value={ui.uiScale}
+          options={[
+            { id: "compact", label: "Compact", title: "Gagne de la place sur un petit écran" },
+            { id: "confort", label: "Confort", title: "Réglage par défaut" },
+            { id: "large", label: "Grande", title: "Textes et poignées agrandis" },
+          ]}
+          onChange={actions.setUiScale}
+        />
+        <p className="ed-note">
+          Ne change que la taille des commandes et des textes : le zoom de la timeline reste
+          indépendant, pour que les glissements collent à la souris.
+        </p>
       </Section>
 
       <Section title="État du moteur" collapsible defaultOpen={false}>

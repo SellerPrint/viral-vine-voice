@@ -969,6 +969,11 @@ function MasksTab() {
   return (
     <>
       <Section title="Zones à flouter">
+        <p className="ed-note">
+          Huit poignées agrippent chaque bord dans la scène, au pixel près. Une zone qui occupe
+          toute la largeur ne se déplace que verticalement : le cadre la retient sur les côtés, et
+          le curseur le signale.
+        </p>
         <div className="ed-btn-row">
           <button
             type="button"
@@ -1287,6 +1292,7 @@ function ProjectTab() {
             ["Suppr", "supprimer la sélection"],
             ["M", "aimantation"],
             ["V", "aperçu des sous-titres"],
+            ["F", "replier les volets : le plan prend la place"],
             ["+ / −", "zoom timeline"],
             ["Ctrl + Z", "annuler"],
             ["Ctrl + E", "exporter"],

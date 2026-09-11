@@ -24,7 +24,7 @@ Tout le traitement vidéo tourne **dans ton navigateur** via `ffmpeg.wasm`. Ton 
 - ✂️ **Coupe automatique des silences** — détection RMS, seuil 400 ms
 - 🖼️ **Masquage de zones** — détection automatique du bandeau de sous-titres FR et des logos
 - 🪞 **Effet miroir** — pour contourner la détection de doublons des plateformes
-- 🎬 **Monteur type logiciel desktop** — timeline multi-pistes (plan, coupes, sous-titres, voix off), vignettes décodées du plan, règle graduée, aimantation, zoom molette, raccourcis `Espace` `J/K/L` `S` `Suppr` `Ctrl+Z`
+- 🎬 **Monteur type logiciel desktop** — timeline multi-pistes (plan, coupes, sous-titres, voix off), vignettes décodées du plan, règle graduée, aimantation, zoom molette, raccourcis `Espace` `J/K/L` `S` `Suppr` `Ctrl+Z`, `F` pour replier les volets quand le plan manque de place
 - 🖱️ **Manipulation directe** — un sous-titre se déplace à la souris, un flou se redimensionne dans l'aperçu, un style se glisse depuis la bibliothèque sur la piste
 - 🔁 **Deux chemins d'export** — rendu local (aucun appel réseau, ré-encode la timeline telle quelle) ou doublage complet ; les pistes générées par l'IA reviennent ensuite dans le monteur, corrigeables
 

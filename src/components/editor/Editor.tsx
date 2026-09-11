@@ -84,6 +84,8 @@ export function Editor() {
   );
 }
 
+const UI_SCALE_KEY = "viraldub.ui-scale";
+
 function EditorFrame() {
   const { project, ui, dispatch } = useEditor();
   const actions = useEditorActions();
@@ -96,6 +98,21 @@ function EditorFrame() {
   // n'est pas encore branché sur le champ, et le test échoue pour une raison
   // qui n'a rien à voir avec l'application.
   useEffect(() => setHydrated(true), []);
+
+  // La densité choisie survit au rechargement. Lecture après montage, jamais
+  // pendant : au rendu côté serveur, `localStorage` n'existe pas et une valeur
+  // lue ici ferait désacorder l'HTML serveur du premier rendu client.
+  useEffect(() => {
+    const saved = window.localStorage.getItem(UI_SCALE_KEY);
+    if (saved === "compact" || saved === "confort" || saved === "large") {
+      if (saved !== ui.uiScale) dispatch({ type: "ui", patch: { uiScale: saved } });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    window.localStorage.setItem(UI_SCALE_KEY, ui.uiScale);
+  }, [ui.uiScale]);
 
   useEditorKeyboard();
 
@@ -146,12 +163,18 @@ function EditorFrame() {
   return (
     <div
       className="ed-root"
+      data-ui={ui.uiScale}
+      data-timeline={ui.timelineOpen ? "open" : "closed"}
       data-dropping={dropping ? "true" : "false"}
       data-hydrated={hydrated ? "true" : "false"}
     >
       <TopBar />
 
-      <div className="ed-main">
+      <div
+        className="ed-main"
+        data-left={ui.leftPanel ? "open" : "closed"}
+        data-right={ui.rightPanel ? "open" : "closed"}
+      >
         <LeftPanel />
         <PreviewStage />
         <Inspector />

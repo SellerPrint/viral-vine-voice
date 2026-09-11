@@ -1,5 +1,5 @@
 import type { CSSProperties, ReactNode } from "react";
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useState } from "react";
 
 /**
  * Primitives d'atelier du monteur.
@@ -351,10 +351,14 @@ export function NumberField({
   suffix?: string;
 }) {
   const [draft, setDraft] = useState(value.toFixed(2));
-  const focused = useRef(false);
+  // État, pas simple `ref` : la remise en forme doit se déclencher à la sortie
+  // du champ aussi. Avec un `ref`, quitter le champ après « 0 » laissait
+  // affiché « 0 » alors que la valeur enregistrée était 0.00 — et le brouillon
+  // ne se ressuyait qu'au changement suivant, ailleurs.
+  const [focused, setFocused] = useState(false);
   useEffect(() => {
-    if (!focused.current) setDraft(Number.isFinite(value) ? value.toFixed(2) : "0.00");
-  }, [value]);
+    if (!focused) setDraft(Number.isFinite(value) ? value.toFixed(2) : "0.00");
+  }, [value, focused]);
 
   const commit = (raw: string) => {
     const parsed = Number.parseFloat(raw.replace(",", "."));
@@ -374,11 +378,9 @@ export function NumberField({
         style={{ fontVariantNumeric: "tabular-nums" }}
         value={draft}
         inputMode="decimal"
-        onFocus={() => {
-          focused.current = true;
-        }}
+        onFocus={() => setFocused(true)}
         onBlur={() => {
-          focused.current = false;
+          setFocused(false);
           commit(draft);
         }}
         onChange={(event) => {

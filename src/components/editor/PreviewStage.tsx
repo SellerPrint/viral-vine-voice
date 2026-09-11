@@ -277,15 +277,22 @@ export function PreviewStage() {
             />
 
             <div ref={overlayRef} className="ed-overlay">
-              {/* Sous-titres d'aperçu, tels qu'incrustés. */}
-              {ui.showSubs && !ui.compare && derived.visibleCue ? (
-                <div
-                  className="ed-subtitle"
-                  style={subtitleStyle(preset.fontsize || SUBTITLE_FONT)}
-                >
-                  {derived.visibleCue.text}
-                </div>
-              ) : null}
+              {/* Sous-titres d'aperçu, tels qu'incrustés. Cette couche de
+                  découpe rend comme le moteur : un bloc ancré sur `yAnchor`
+                  grandit vers le bas, et le cadrage rogne ce qui dépasse du
+                  plan. Le cadre ne rogne plus lui-même — depuis que les
+                  poignées des zones doivent déborder — donc le calque de texte
+                  porte son propre `overflow: hidden`. */}
+              <div className="ed-subtitle-clip">
+                {ui.showSubs && !ui.compare && derived.visibleCue ? (
+                  <div
+                    className="ed-subtitle"
+                    style={subtitleStyle(preset.fontsize || SUBTITLE_FONT)}
+                  >
+                    {derived.visibleCue.text}
+                  </div>
+                ) : null}
+              </div>
 
               {/* Zones à masquer, manipulables à la souris. */}
               {ui.showMasks && !ui.compare
@@ -295,6 +302,10 @@ export function PreviewStage() {
                       <div
                         key={zone.id}
                         className={`ed-mask${maskSelected(state.selection, zone.id) ? " is-selected" : ""}`}
+                        // Un bandeau pleine largeur ne peut pas glisser
+                        // horizontalement (le cadre le contraint) : le curseur
+                        // doit le dire, sinon on insiste sur un axe muet.
+                        data-axis={zone.w >= 0.995 ? "y" : zone.h >= 0.995 ? "x" : undefined}
                         style={{
                           left: `${zone.x * 100}%`,
                           top: `${zone.y * 100}%`,
@@ -311,22 +322,7 @@ export function PreviewStage() {
                           <span
                             key={corner}
                             className="ed-mask-handle"
-                            style={{
-                              left: corner.includes("w")
-                                ? 0
-                                : corner.includes("e")
-                                  ? "100%"
-                                  : "50%",
-                              top: corner.includes("n") ? 0 : corner.includes("s") ? "100%" : "50%",
-                              cursor:
-                                corner.length === 1
-                                  ? corner === "n" || corner === "s"
-                                    ? "ns-resize"
-                                    : "ew-resize"
-                                  : corner === "nw" || corner === "se"
-                                    ? "nwse-resize"
-                                    : "nesw-resize",
-                            }}
+                            data-corner={corner}
                             onPointerDown={(event) => beginDrag(event, zone, corner)}
                           />
                         ))}

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 
 import { buildThumbs, releaseThumbs, type Thumb } from "@/lib/editor/thumbs";
 import { decodeMediaPeaks, peaksForRanges } from "@/lib/editor/waveform";
@@ -7,6 +7,17 @@ import { TRACK_LAYOUT, type Clip, type Project, type TrackId } from "@/lib/edito
 
 import { IconButton } from "./ui";
 import { useEditor, useEditorActions } from "./editor-context";
+
+/**
+ * Hauteur d'une piste, en variable CSS plutôt qu'en `height` posée à la main :
+ * la densité de l'interface (`--ed-ui`, voir `styles.css`) peut alors l'ajuster
+ * sans toucher à l'échelle horizontale, qui reste le propre du zoom. Les deux
+ * doivent bouger ensemble — tête et piste — sinon le défilement synchrone
+ * décale les libellés des rangées.
+ */
+function laneVars(height: number): CSSProperties {
+  return { "--ed-lane-base": `${height}px` } as CSSProperties;
+}
 
 /**
  * La timeline.
@@ -213,7 +224,7 @@ export function Timeline() {
       <div className="ed-tl-body">
         {/* ---------------------------- en-têtes ---------------------------- */}
         <div className="ed-track-heads" ref={headsRef}>
-          <div style={{ height: 24, borderBottom: "1px solid var(--ed-line)" }} />
+          <div style={{ height: "var(--ed-ruler-h)", borderBottom: "1px solid var(--ed-line)" }} />
           {TRACK_LAYOUT.map((track) => {
             const count = project.clips.filter((clip) => clip.track === track.id).length;
             const isSubs = track.id === "subs";
@@ -222,7 +233,7 @@ export function Timeline() {
               <div
                 key={track.id}
                 className={`ed-track-head${dropLane === track.id ? " is-active" : ""}`}
-                style={{ height: track.height }}
+                style={laneVars(track.height)}
                 title={track.hint}
               >
                 <span className="ed-track-name">{track.label}</span>
@@ -519,7 +530,12 @@ function Lane({
     <div
       className="ed-lane"
       data-lane={track}
-      style={{ height: meta.height, ["--ed-grid-step" as string]: `${Math.max(24, px)}px` }}
+      style={
+        {
+          ...laneVars(meta.height),
+          ["--ed-grid-step" as string]: `${Math.max(24, px)}px`,
+        } as CSSProperties
+      }
       onPointerDown={(event) => {
         if (event.target === event.currentTarget && onPointerDownBackground) {
           onPointerDownBackground(event.clientX);
@@ -535,7 +551,7 @@ function Lane({
 }
 
 function EmptyLane({ height }: { height: number }) {
-  return <div className="ed-lane" style={{ height }} />;
+  return <div className="ed-lane" style={laneVars(height)} />;
 }
 
 function allowDrop(event: React.DragEvent, track: TrackId, setter: (value: TrackId) => void) {

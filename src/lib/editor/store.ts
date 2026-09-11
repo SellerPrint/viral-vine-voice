@@ -78,6 +78,24 @@ export type UiState = {
    * encodage sans voix en croyant lancer le doublage.
    */
   exportMode: "local" | "ia";
+  /**
+   * Densité de l'interface. Préférence de confort, pas une donnée du montage :
+   * elle ne passe donc pas par l'historique et ne s'exporte pas avec le plan.
+   */
+  uiScale: "compact" | "confort" | "large";
+  /**
+   * Volets gauche (médiathèque) et droit (inspecteur). Sur un portable, rien
+   * que les deux rendus invisibles rend le plan 40 % plus grand : le montage
+   * vertical 9:16 est étranglé en largeur, pas en hauteur.
+   */
+  leftPanel: boolean;
+  rightPanel: boolean;
+  /**
+   * Le plan 9:16 est bridé en hauteur, pas en largeur : replier les volets latéraux
+   * ne le grandit donc presque rien. C'est la hauteur de la timeline qu'il faut
+   * lui rendre quand on veut regarder le montage au lieu de le corriger.
+   */
+  timelineOpen: boolean;
 };
 
 export type EditorState = {
@@ -105,6 +123,10 @@ export const INITIAL_UI: UiState = {
   notice: null,
   exportOpen: false,
   exportMode: "local",
+  uiScale: "confort",
+  leftPanel: true,
+  rightPanel: true,
+  timelineOpen: true,
 };
 
 export type Action =

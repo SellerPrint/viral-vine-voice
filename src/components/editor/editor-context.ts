@@ -100,6 +100,8 @@ export function useEditorActions() {
         dispatch({ type: "loadProject", project, ...options }),
       notify: (notice: Notice) => dispatch({ type: "ui", patch: { notice } }),
       setBusy: (busy: string | null) => dispatch({ type: "ui", patch: { busy } }),
+      setUiScale: (uiScale: "compact" | "confort" | "large") =>
+        dispatch({ type: "ui", patch: { uiScale } }),
       // Le mode est toujours reposé : « Exporter » doit ouvrir le rendu local
       // même si la dernière boîte lancée l'était par « Doublage IA ».
       openExport: (open = true, mode: "local" | "ia" = "local") =>
@@ -229,6 +231,11 @@ function timelineWidth(): number {
  * l'écouteur à chaque image pendant la lecture, soit soixante poses de listener
  * par seconde pour un geste qui n'a rien à voir avec le clavier.
  */
+/** Touche, en minuscules, sans supposer que `event.key` est une lettre. */
+function key0(event: KeyboardEvent): string {
+  return (event.key ?? "").toLowerCase();
+}
+
 export function useEditorKeyboard() {
   const editor = useEditor();
   const latest = useRef(editor);
@@ -253,6 +260,16 @@ export function useEditorKeyboard() {
       if (event.key === "Escape") {
         if (ui.exportOpen) setUi({ exportOpen: false });
         else dispatch({ type: "select", selection: null });
+        return;
+      }
+
+      /* F : l'aperçu prend toute la place. Sur un portable, replier les deux
+         volets est le moyen le plus direct de rendre un plan vertical lisible
+         sans sortir du montage — plus efficace que de grossir les contrôles. */
+      if (key0(event) === "f" && !event.metaKey && !event.ctrlKey && !event.altKey) {
+        event.preventDefault();
+        const open = !(ui.leftPanel && ui.rightPanel && ui.timelineOpen);
+        setUi({ leftPanel: open, rightPanel: open, timelineOpen: open });
         return;
       }
 

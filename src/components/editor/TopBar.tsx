@@ -68,6 +68,38 @@ export function TopBar() {
 
       <div style={{ flex: 1 }} />
 
+      {/* Volets : « tout est petit » se règle d'abord en rendant de la place au
+          plan, avant de grossir les contrôles. */}
+      <div className="ed-seg" role="group" aria-label="Volets de l'atelier">
+        <button
+          type="button"
+          className={`ed-seg-btn${ui.leftPanel ? " is-active" : ""}`}
+          aria-pressed={ui.leftPanel}
+          title="Médiathèque à gauche — F replie ou rouvre les trois volets"
+          onClick={() => dispatch({ type: "ui", patch: { leftPanel: !ui.leftPanel } })}
+        >
+          Médiathèque
+        </button>
+        <button
+          type="button"
+          className={`ed-seg-btn${ui.timelineOpen ? " is-active" : ""}`}
+          aria-pressed={ui.timelineOpen}
+          title="Timeline — la replier rend de la hauteur au plan"
+          onClick={() => dispatch({ type: "ui", patch: { timelineOpen: !ui.timelineOpen } })}
+        >
+          Timeline
+        </button>
+        <button
+          type="button"
+          className={`ed-seg-btn${ui.rightPanel ? " is-active" : ""}`}
+          aria-pressed={ui.rightPanel}
+          title="Inspecteur à droite — F replie ou rouvre les trois volets"
+          onClick={() => dispatch({ type: "ui", patch: { rightPanel: !ui.rightPanel } })}
+        >
+          Inspecteur
+        </button>
+      </div>
+
       <span className="ed-timecode" style={{ marginRight: 4 }}>
         {project.source ? (
           <>

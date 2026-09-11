@@ -635,11 +635,15 @@ input[type="range"].ed-slider::-moz-range-thumb {
     9px -9px,
     -9px 0;
 }
+/* Le cadre ne rogne plus : les poignées des zones sont à cheval sur les bords
+   (voir plus bas), et une zone collée en haut ou à droite perdait la moitié de
+   ses cibles de préhension — invisibles, donc hors d'atteinte. L'arrondi est
+   repris par l'image elle-même, qui seule débordait. */
 .ed-frame {
   position: relative;
   background: #000;
   border-radius: 4px;
-  overflow: hidden;
+  overflow: visible;
   box-shadow: var(--ed-shadow);
   /* Le cadre porte l'aspect-ratio de la source : `height: 100%` le cale sur la
      hauteur disponible, `max-width` le ramène en largeur pour un plan à
@@ -648,10 +652,16 @@ input[type="range"].ed-slider::-moz-range-thumb {
   width: auto;
   max-width: 100%;
   max-height: 100%;
+  /* Un enfant de grille en `overflow: visible` prend une taille minimale
+     « auto », c'est-à-dire celle de son contenu : sans ce 0, le cadre refusait
+     de se réduire à la hauteur de la scène et débordait à 960 px. */
+  min-width: 0;
+  min-height: 0;
 }
 .ed-frame video {
   width: 100%;
   height: 100%;
+  border-radius: inherit;
   object-fit: contain;
   display: block;
 }
@@ -672,6 +682,12 @@ input[type="range"].ed-slider::-moz-range-thumb {
   white-space: pre-line;
   width: 92%;
   /* Le rendu FFmpeg centre le bloc, puis le cale à `yAnchor` du cadre. */
+}
+.ed-subtitle-clip {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
 }
 .ed-mask {
   position: absolute;
@@ -764,7 +780,9 @@ input[type="range"].ed-slider::-moz-range-thumb {
 }
 .ed-tl-body {
   display: grid;
-  grid-template-columns: 156px minmax(0, 1fr);
+  /* La colonne des têtes suit la densité : à 156 px fixes, « Textes » et
+     « Voix off » devenaient « Te… » et « Voi… » dès que les textes grossissent. */
+  grid-template-columns: calc(156px * var(--ed-ui)) minmax(0, 1fr);
   min-height: 0;
 }
 .ed-track-heads {
@@ -918,11 +936,14 @@ input[type="range"].ed-slider::-moz-range-thumb {
   justify-content: center;
   gap: 2px;
 }
+/* Poignées de rognage de la timeline : 8 px invisibles tant qu'on ne survole
+   pas, c'était un clic dans le vide la plupart du temps. Elles restent
+   maintenant perceptibles, et leur cible fait la hauteur du bloc. */
 .ed-clip-handle {
   position: absolute;
   top: 0;
   bottom: 0;
-  width: 8px;
+  width: calc(12px * var(--ed-ui));
   cursor: ew-resize;
   background: linear-gradient(to right, rgba(255, 255, 255, 0.28), transparent);
   opacity: 0;
@@ -935,6 +956,24 @@ input[type="range"].ed-slider::-moz-range-thumb {
 .ed-clip:hover .ed-clip-handle,
 .ed-clip.is-selected .ed-clip-handle {
   opacity: 1;
+}
+.ed-clip-handle::after {
+  content: "";
+  position: absolute;
+  top: 25%;
+  bottom: 25%;
+  width: 3px;
+  border-radius: 99px;
+  background: rgba(255, 255, 255, 0.75);
+}
+.ed-clip-handle.left::after {
+  left: 3px;
+}
+.ed-clip-handle.right::after {
+  right: 3px;
+}
+.ed-clip-handle {
+  opacity: 0.45;
 }
 .ed-thumbs {
   position: absolute;
@@ -1289,4 +1328,313 @@ input[type="range"].ed-slider::-moz-range-thumb {
     radial-gradient(circle at 85% 15%, oklch(0.82 0.18 195 / 0.2), transparent 45%),
     radial-gradient(circle at 50% 90%, oklch(0.75 0.22 320 / 0.18), transparent 55%),
     var(--color-background);
+}
+
+/* --------------------------------------------------------------------------
+   Densité de l'interface
+   --------------------------------------------------------------------------
+   L'atelier se pensait sur un grand écran de montage ; sur un portable
+   (1568 px de large, Windows à 100 %), les contrôles tombaient à 9-11 px et
+   les poignées de masque à 9 px — ingérables au doigt comme au trackpad.
+
+   Une seule molette, `--ed-ui`, et trois crans choisis dans l'inspecteur
+   (Projet → Interface). Seules les **hauteurs** et les **corps de texte**
+   passent par là : l'échelle horizontale de la timeline (pixels par seconde)
+   reste fixée par le zoom, sinon les gestes de glissement ne correspondraient
+   plus au déplacement de la souris.
+   -------------------------------------------------------------------------- */
+.ed-root {
+  --ed-ui: 1;
+  --ed-fs: calc(13.5px * var(--ed-ui));
+  --ed-fs-sm: calc(12.5px * var(--ed-ui));
+  --ed-fs-note: calc(12px * var(--ed-ui));
+  --ed-fs-title: calc(11.5px * var(--ed-ui));
+  --ed-fs-rail: calc(11px * var(--ed-ui));
+  --ed-rail-w: calc(74px * var(--ed-ui));
+  --ed-panel-w: calc(306px * var(--ed-ui));
+  --ed-inspector-w: calc(322px * var(--ed-ui));
+  --ed-topbar-h: calc(54px * var(--ed-ui));
+  --ed-btn-h: calc(34px * var(--ed-ui));
+  --ed-input-h: calc(32px * var(--ed-ui));
+  --ed-ruler-h: calc(30px * var(--ed-ui));
+  --ed-handle: calc(15px * var(--ed-ui));
+  --ed-hit: calc(9px * var(--ed-ui));
+  /* Les pistes gagnent 15 % hors mise à l'échelle : un bloc de sous-titre doit
+     se saisir sans viser une ligne de 3 px au pixel près. */
+  --ed-lane-h: calc(var(--ed-lane-base, 40px) * var(--ed-ui) * 1.15);
+  font-size: var(--ed-fs);
+  grid-template-rows: var(--ed-topbar-h) minmax(0, 1fr) auto;
+}
+.ed-root[data-ui="compact"] {
+  --ed-ui: 0.88;
+}
+.ed-root[data-ui="large"] {
+  --ed-ui: 1.18;
+}
+
+/* Les largeurs de volets sont des variables : les replier laisse la colonne à
+   0 au lieu de casser la grille, et le plan récupère toute la place. */
+.ed-main {
+  --ed-left-w: var(--ed-panel-w);
+  --ed-right-w: var(--ed-inspector-w);
+  grid-template-columns: var(--ed-rail-w) var(--ed-left-w) minmax(0, 1fr) var(--ed-right-w);
+}
+.ed-main[data-left="closed"] {
+  --ed-left-w: 0px;
+}
+.ed-main[data-right="closed"] {
+  --ed-right-w: 0px;
+}
+.ed-main[data-left="closed"] .ed-panel-wrap {
+  display: none;
+}
+.ed-main[data-right="closed"] .ed-inspector-wrap {
+  display: none;
+}
+/* Timeline repliée : il ne reste que la barre d'outils, et le plan récupère
+   les ~300 px. Les pistes sont masquées, pas démontées — les repères de
+   défilement synchrone et les largeurs mesurées restent valides. */
+.ed-root[data-timeline="closed"] .ed-tl-body,
+.ed-root[data-timeline="closed"] .ed-timeline {
+  height: auto;
+}
+.ed-root[data-timeline="closed"] .ed-tl-body {
+  display: none;
+}
+/* Le nom du plan ne doit pas passer sur deux lignes à la densité « grande » :
+   il poussait les bascules de volets hors de la barre et les rendait
+   inaccessibles. C'est lui qui s'éclipse, pas les commandes. */
+.ed-topbar .ed-timecode {
+  flex: 0 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ed-topbar .ed-seg {
+  flex: none;
+}
+.ed-seg {
+  display: inline-flex;
+  border: 1px solid var(--ed-line);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.ed-seg-btn {
+  height: calc(30px * var(--ed-ui));
+  padding: 0 calc(10px * var(--ed-ui));
+  border: 0;
+  background: var(--ed-surface-2);
+  color: var(--ed-text-faint);
+  font-size: calc(12px * var(--ed-ui));
+  cursor: pointer;
+}
+.ed-seg-btn + .ed-seg-btn {
+  border-left: 1px solid var(--ed-line);
+}
+.ed-seg-btn:hover {
+  color: var(--ed-text);
+}
+.ed-seg-btn.is-active {
+  background: var(--ed-surface-3);
+  color: var(--ed-text);
+}
+.ed-rail-btn {
+  width: calc(64px * var(--ed-ui));
+  padding: calc(8px * var(--ed-ui)) 0 calc(6px * var(--ed-ui));
+  gap: calc(4px * var(--ed-ui));
+  font-size: var(--ed-fs-rail);
+}
+.ed-btn {
+  height: var(--ed-btn-h);
+  padding: 0 calc(12px * var(--ed-ui));
+  font-size: var(--ed-fs-sm);
+  gap: calc(7px * var(--ed-ui));
+}
+.ed-btn--sm {
+  height: calc(29px * var(--ed-ui));
+  font-size: var(--ed-fs-note);
+}
+.ed-icon-btn--mini {
+  width: calc(27px * var(--ed-ui));
+  height: calc(27px * var(--ed-ui));
+}
+.ed-section-title {
+  font-size: var(--ed-fs-title);
+  letter-spacing: 0.06em;
+}
+.ed-note {
+  font-size: var(--ed-fs-note);
+  line-height: 1.5;
+}
+.ed-input,
+.ed-textarea,
+.ed-select {
+  min-height: var(--ed-input-h);
+  padding: calc(7px * var(--ed-ui)) calc(9px * var(--ed-ui));
+  font-size: var(--ed-fs-sm);
+}
+.ed-chip {
+  padding: calc(6px * var(--ed-ui)) calc(11px * var(--ed-ui));
+  font-size: var(--ed-fs-note);
+}
+.ed-timecode {
+  font-size: var(--ed-fs);
+}
+.ed-ruler {
+  height: var(--ed-ruler-h);
+}
+.ed-lane,
+.ed-track-head {
+  height: var(--ed-lane-h);
+}
+.ed-track-head {
+  padding: 0 calc(8px * var(--ed-ui));
+  gap: calc(5px * var(--ed-ui));
+  font-size: var(--ed-fs-sm);
+}
+.ed-clip {
+  top: calc(4px * var(--ed-ui));
+  bottom: calc(4px * var(--ed-ui));
+  font-size: var(--ed-fs-note);
+  border-radius: calc(6px * var(--ed-ui));
+}
+.ed-timeline {
+  height: clamp(calc(232px * var(--ed-ui)), 34vh, calc(372px * var(--ed-ui)));
+}
+/* --------------------------------------------------------------------------
+   Zones à flouter : cibles de préhension
+   --------------------------------------------------------------------------
+   Trois réglages d'un même geste.
+
+   1. Les poignées font la taille d'un doigt, pas d'un pixel (15 px, et
+      jusqu'à 18 en densité « grande »).
+   2. Elles sont centrées SUR le bord de la zone, à moitié dehors. Plaquées à
+      l'intérieur — pour ne pas être rognées — elles recouvraient le centre
+      d'un petit rectangle : 15 px de poignée sur 36 px de zone, et le
+      glissement du corps se changeait en redimensionnement. D'où le « rien ne
+      bouge ». Le cadre ne rogne plus (`.ed-frame`, overflow visible ; seule
+      l'image garde son arrondi), donc le bord externe reste atteignable.
+   3. La cible utile déborde la poignée visible de 9 px, mais seulement vers
+      l'extérieur : faites dans les huit directions, ces zones se recouvraient
+      et poser le curseur au centre de « n » saisissait « ne ».
+
+   Un bandeau pleine largeur ne peut pas glisser horizontalement — le cadre
+   l'y contraint ; `data-axis` l'annonce au curseur pour qu'on n'insiste pas
+   sur un axe muet.
+   -------------------------------------------------------------------------- */
+.ed-mask {
+  border-width: calc(2px * var(--ed-ui));
+}
+.ed-mask[data-axis="y"] {
+  cursor: ns-resize;
+}
+.ed-mask[data-axis="x"] {
+  cursor: ew-resize;
+}
+.ed-mask-label {
+  top: calc(-21px * var(--ed-ui));
+  font-size: calc(11.5px * var(--ed-ui));
+  line-height: calc(19px * var(--ed-ui));
+  padding: 0 calc(7px * var(--ed-ui));
+}
+.ed-mask-label.below {
+  top: calc(100% + 3px * var(--ed-ui));
+}
+.ed-mask-handle {
+  --ed-half: calc(var(--ed-handle) / -2);
+  width: var(--ed-handle);
+  height: var(--ed-handle);
+  margin: 0;
+  border: calc(1.5px * var(--ed-ui)) solid var(--ed-select);
+  border-radius: calc(3px * var(--ed-ui));
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5);
+}
+.ed-mask-handle::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+}
+.ed-mask-handle[data-corner="n"]::after {
+  top: calc(var(--ed-half));
+}
+.ed-mask-handle[data-corner="s"]::after {
+  bottom: calc(var(--ed-half));
+}
+.ed-mask-handle[data-corner="e"]::after {
+  right: calc(var(--ed-half));
+}
+.ed-mask-handle[data-corner="w"]::after {
+  left: calc(var(--ed-half));
+}
+.ed-mask-handle[data-corner="nw"]::after {
+  top: calc(var(--ed-half));
+  left: calc(var(--ed-half));
+}
+.ed-mask-handle[data-corner="ne"]::after {
+  top: calc(var(--ed-half));
+  right: calc(var(--ed-half));
+}
+.ed-mask-handle[data-corner="sw"]::after {
+  bottom: calc(var(--ed-half));
+  left: calc(var(--ed-half));
+}
+.ed-mask-handle[data-corner="se"]::after {
+  bottom: calc(var(--ed-half));
+  right: calc(var(--ed-half));
+}
+.ed-mask-handle[data-corner="nw"] {
+  left: var(--ed-half);
+  top: var(--ed-half);
+  cursor: nwse-resize;
+}
+.ed-mask-handle[data-corner="n"] {
+  left: 50%;
+  top: var(--ed-half);
+  transform: translateX(-50%);
+  cursor: ns-resize;
+}
+.ed-mask-handle[data-corner="ne"] {
+  right: var(--ed-half);
+  top: var(--ed-half);
+  cursor: nesw-resize;
+}
+.ed-mask-handle[data-corner="e"] {
+  right: var(--ed-half);
+  top: 50%;
+  transform: translateY(-50%);
+  cursor: ew-resize;
+}
+.ed-mask-handle[data-corner="se"] {
+  right: var(--ed-half);
+  bottom: var(--ed-half);
+  cursor: nwse-resize;
+}
+.ed-mask-handle[data-corner="s"] {
+  left: 50%;
+  bottom: var(--ed-half);
+  transform: translateX(-50%);
+  cursor: ns-resize;
+}
+.ed-mask-handle[data-corner="sw"] {
+  left: var(--ed-half);
+  bottom: var(--ed-half);
+  cursor: nesw-resize;
+}
+.ed-mask-handle[data-corner="w"] {
+  left: var(--ed-half);
+  top: 50%;
+  transform: translateY(-50%);
+  cursor: ew-resize;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .ed-mask-handle {
+    transition:
+      width 120ms ease,
+      height 120ms ease;
+  }
+  .ed-mask:hover .ed-mask-handle {
+    width: calc(var(--ed-handle) * 1.15);
+    height: calc(var(--ed-handle) * 1.15);
+  }
 }

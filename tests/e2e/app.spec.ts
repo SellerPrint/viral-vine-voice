@@ -394,3 +394,207 @@ test("le moteur vidéo se charge effectivement", async ({ page }) => {
   // avoir d'abord réglé la résolution du worker.
   expect(result.multiThread).toBe(false);
 });
+
+/* --------------------------------------------------------------------------
+   Manipulation des zones et lisibilité de l'atelier
+   --------------------------------------------------------------------------
+   Deux retours venus du déploiement réel, sur un portable à 1568 × 882 et
+   Windows à 100 % : « les éléments ne se déplacent pas avec les poignées » et
+   « tout est petit, peu visible ». Aucun des deux ne se voyait à 1280 px sur
+   un plan bien plus grand que la zone à régler — d'où des cas explicites,
+   mesurés dans le navigateur, sur la taille réelle des cibles.
+   -------------------------------------------------------------------------- */
+
+/** Charge la démo et attend que les zones floutables soient en place. */
+async function openDemoWithMasks(page: import("@playwright/test").Page) {
+  await page.setViewportSize({ width: 1568, height: 882 });
+  await page.goto("/", { waitUntil: "networkidle" });
+  await expectHydrated(page);
+  await expect(page.locator(".ed-mask").first()).toBeVisible({ timeout: 30_000 });
+}
+
+test("chaque poignée d'une zone est atteignable là où elle s'affiche", async ({ page }) => {
+  await openDemoWithMasks(page);
+
+  // Régression vécue : les cibles étaient centrées SUR le bord de la zone, donc
+  // à moitié dehors, et le cadre rognait (`overflow: hidden`). Une zone collée
+  // en haut ou à droite perdait ses poignées — invisibles, donc ingérables.
+  // Pire : égales dans les huit directions, elles recouvraient le centre d'un
+  // petit rectangle et le glissement du corps saisissait une voisine.
+  const report = await page.evaluate(() => {
+    // On mesure la visibilité dans la scène, pas dans le cadre : les poignées
+    // sont volontairement à cheval sur les bords de la zone, donc à moitié
+    // dehors. Ce qui ne doit pas arriver, c'est qu'elles sortent de la surface
+    // affichée — `.ed-stage-canvas` rogne, et une poignée rognée est une
+    // poignée que personne ne trouve.
+    const frame = document.querySelector(".ed-stage-canvas")?.getBoundingClientRect();
+    if (!frame) return null;
+    const zones = [...document.querySelectorAll(".ed-mask")];
+    return zones.map((zone) => {
+      const handles = [...zone.querySelectorAll<HTMLElement>(".ed-mask-handle")];
+      return {
+        total: handles.length,
+        horsCadre: handles.filter((h) => {
+          const r = h.getBoundingClientRect();
+          return (
+            r.left < frame.left - 0.5 ||
+            r.right > frame.right + 0.5 ||
+            r.top < frame.top - 0.5 ||
+            r.bottom > frame.bottom + 0.5
+          );
+        }).length,
+        detournees: handles.filter((h) => {
+          const r = h.getBoundingClientRect();
+          return document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2) !== h;
+        }).length,
+        cote: handles.length ? Math.round(handles[0].getBoundingClientRect().width) : 0,
+      };
+    });
+  });
+
+  expect(report).not.toBeNull();
+  for (const zone of report!) {
+    expect(zone.total).toBe(8);
+    expect(zone.cote).toBeGreaterThanOrEqual(13); // une cible, pas un pixel
+    expect(zone.horsCadre, "une poignée hors de la scène est ingérable").toBe(0);
+    expect(zone.detournees).toBe(0);
+  }
+});
+
+test("glisser une zone la déplace d'autant que la souris, poignée par poignée", async ({
+  page,
+}) => {
+  await openDemoWithMasks(page);
+
+  const style = () =>
+    page.evaluate(() => {
+      const s = document.querySelectorAll<HTMLElement>(".ed-mask")[1].style;
+      return {
+        left: parseFloat(s.left),
+        top: parseFloat(s.top),
+        w: parseFloat(s.width),
+        h: parseFloat(s.height),
+      };
+    });
+
+  const drag = async (from: { x: number; y: number }, dx: number, dy: number) => {
+    await page.mouse.move(from.x, from.y);
+    await page.mouse.down();
+    await page.mouse.move(from.x + dx, from.y + dy, { steps: 10 });
+    await page.mouse.up();
+    await page.waitForTimeout(250);
+  };
+
+  const box = await page.locator(".ed-mask").nth(1).boundingBox();
+  expect(box).toBeTruthy();
+  const centre = { x: box!.x + box!.width / 2, y: box!.y + box!.height / 2 };
+
+  // Corps de la zone : translation 1:1. La scène a la largeur du plan, donc
+  // 60 px à l'écran valent 60 / largeur × 100 pourcents en base de scène.
+  // Un pourcentage de zone se lit sur l'axe correspondant du plan : largeur
+  // pour x, hauteur pour y. Les confondre est l'erreur classique, et c'est
+  // justement ce que ces deux lignes vérifient dans l'autre sens.
+  const plan = await page.evaluate(() => {
+    const r = document.querySelector(".ed-frame")?.getBoundingClientRect();
+    return { w: r?.width ?? 0, h: r?.height ?? 0 };
+  });
+  const avant = await style();
+  await drag(centre, 60, 40);
+  const apres = await style();
+  expect(Math.abs(apres.left - avant.left - (60 / plan.w) * 100)).toBeLessThan(1.5);
+  expect(Math.abs(apres.top - avant.top - (40 / plan.h) * 100)).toBeLessThan(1.5);
+  expect(apres.w).toBeCloseTo(avant.w, 1); // bouger ne redimensionne pas
+
+  // Les huit poignées commandent leur bord, sans exception.
+  for (const coin of ["n", "s", "e", "w", "nw", "ne", "sw", "se"]) {
+    const cible = await page.evaluate((name) => {
+      const zone = document.querySelectorAll<HTMLElement>(".ed-mask")[1];
+      zone.style.left = "8%";
+      zone.style.top = "24%";
+      zone.style.width = "26%";
+      zone.style.height = "10%";
+      const h = [...zone.querySelectorAll<HTMLElement>(".ed-mask-handle")].find(
+        (x) => x.dataset.corner === name,
+      )!;
+      const r = h.getBoundingClientRect();
+      return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+    }, coin);
+    // Style posé à la main : seul le geste doit le défaire, on repart donc de
+    // l'état du plan (le reducer ignore un style écrit dans le DOM).
+    await page.locator(".ed-mask").nth(1).click();
+    const etat = await style();
+    await drag(
+      cible,
+      coin.includes("w") ? -16 : coin.includes("e") ? 16 : 0,
+      coin.includes("n") ? -14 : coin.includes("s") ? 14 : 0,
+    );
+    const apresPoignee = await style();
+    const horizontal = coin.includes("w") || coin.includes("e");
+    const aBouge = horizontal
+      ? Math.abs(apresPoignee.w - etat.w) > 0.5
+      : Math.abs(apresPoignee.h - etat.h) > 0.5;
+    expect(aBouge, `la poignée ${coin} doit commander son bord`).toBe(true);
+  }
+});
+
+test("une zone collée au bord se règle à 0 % sans être repoussée", async ({ page }) => {
+  await openDemoWithMasks(page);
+
+  // Le champ de position appliquait un plancher de taille (2 %) : impossible
+  // d'aligner un logo sur le bord gauche, la valeur sautait d'elle-même à 2.
+  await page.locator(".ed-mask").nth(2).click();
+  const champ = page.locator('label:has-text("X %") input').first();
+  await expect(champ).toBeVisible();
+  await champ.fill("0");
+  await champ.press("Enter");
+  await page.waitForTimeout(250);
+
+  // Tant que le champ garde le focus il montre ce qui a été tapé ; la valeur
+  // reformatée n'arrive qu'à la sortie du champ.
+  await champ.blur();
+  await expect(champ).toHaveValue("0.00");
+  const left = await page.evaluate(() =>
+    parseFloat(document.querySelectorAll<HTMLElement>(".ed-mask")[2].style.left),
+  );
+  expect(left).toBe(0);
+});
+
+test("la densité de l'interface se règle, se retient, et F rend le plan lisible", async ({
+  page,
+}) => {
+  await openDemoWithMasks(page);
+
+  const tailleTexte = () =>
+    page.evaluate(() => parseFloat(getComputedStyle(document.querySelector(".ed-root")!).fontSize));
+
+  await page
+    .locator('.ed-inspector button[title="Afficher l\'inspecteur"], .ed-topbar .ed-seg-btn')
+    .first();
+  await page.locator(".ed-inspector button", { hasText: "Projet" }).first().click();
+  await page.locator(".ed-inspector button", { hasText: "Grande" }).click();
+  await page.waitForTimeout(250);
+  expect(await page.getAttribute(".ed-root", "data-ui")).toBe("large");
+  expect(await tailleTexte()).toBeGreaterThan(15);
+
+  // Choix durable : un monteur qui règle son confort ne le règle pas deux fois.
+  await page.reload({ waitUntil: "networkidle" });
+  await expectHydrated(page);
+  await expect(page.locator(".ed-root")).toHaveAttribute("data-ui", "large");
+
+  // Et surtout : sur un plan vertical, ce qui manque c'est de la hauteur. Le
+  // repli des volets et de la timeline doit donc agrandir le plan, pas seulement
+  // dégager la place sur les côtés.
+  await page.locator(".ed-root").click({ position: { x: 8, y: 8 } });
+  const avant = await page.evaluate(
+    () => document.querySelector(".ed-frame")?.getBoundingClientRect().height ?? 0,
+  );
+  await page.keyboard.press("f");
+  await page.waitForTimeout(400);
+  const apres = await page.evaluate(
+    () => document.querySelector(".ed-frame")?.getBoundingClientRect().height ?? 0,
+  );
+  expect(apres).toBeGreaterThan(avant * 1.3);
+  await page.keyboard.press("f");
+  await page.waitForTimeout(300);
+  await expect(page.locator(".ed-timeline")).toBeVisible();
+});
