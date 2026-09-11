@@ -112,19 +112,31 @@ export function describeDegradation(attempt: RenderAttempt, inputs: GraphInputs)
  * Coûte ~200 ms et évite un ré-encodage complet voué à échouer : sans cela,
  * six tentatives sur une vidéo d'une minute peuvent prendre plusieurs minutes
  * avant d'aboutir au rendu le plus dégradé.
+ *
+ * `inputName` est indispensable dès que le média a une piste audio. Sur une
+ * source `lavfi` `color=…` il n'y a **pas de flux audio**, donc le moindre
+ * graphe contenant `[0:a]` — donc tout montage qui conserve l'ambiance —
+ * échoue la validation avec « Stream specifier ':a' … matches no streams ».
+ * Le ladder de repli consommait alors toutes ses tentatives et finissait par
+ * jeter l'éponge : un plan avec du son ne se rendait plus, quel que soit son
+ * contenu. On valide donc sur le vrai fichier, à une image près (`-frames:v 1`
+ * + `-t`), en conservant la source de test en dernier recours.
  */
 export async function validateGraph(
   ff: FFmpeg,
   graph: string,
   withVoice: boolean,
+  inputName?: string,
 ): Promise<boolean> {
-  const args = ["-y", "-f", "lavfi", "-i", "color=c=black:s=64x64:d=0.1:r=10"];
+  const args = inputName
+    ? ["-y", "-i", inputName]
+    : ["-y", "-f", "lavfi", "-i", "color=c=black:s=64x64:d=0.1:r=10"];
   if (withVoice) {
     args.push("-f", "lavfi", "-i", "anullsrc=channel_layout=mono:sample_rate=44100:d=0.1");
   }
   args.push("-filter_complex", graph, "-map", "[vout]");
   if (graph.includes("[aout]")) args.push("-map", "[aout]");
-  args.push("-frames:v", "1", "-f", "null", "-");
+  args.push("-frames:v", "1", "-t", "0.2", "-f", "null", "-");
 
   try {
     return (await ff.exec(args)) === 0;
@@ -150,6 +162,41 @@ export type RenderConfig = {
   signal?: AbortSignal;
 };
 
+/**
+ * Planifie les tentatives de rendu pour un projet donné.
+ *
+ * Une option absente du projet n'est pas une dégradation à lâcher : c'est son
+ * état initial. Sans cette normalisation, un montage sans voix off écartait
+ * *toutes* les tentatives où `voice: true` — donc les quatre premières, celles
+ * qui conservaient les masques et le filtre — et finissait par rendre la
+ * cinquième, « coupes prioritaires », en perdant au passage le floutage et
+ * l'étalonnage demandés. Les doublons retirés, le cas favorable ne coûte plus
+ * qu'un seul graphe validé au lieu de quatre.
+ */
+export function planAttempts(inputs: GraphInputs): RenderAttempt[] {
+  const wantsLook = (inputs.filterId ?? "none") !== "none" || (inputs.upscale ?? "none") !== "none";
+  const wantsTransition = (inputs.transition ?? "none") !== "none" && inputs.keeps.length > 1;
+  const wantsCuts = inputs.keeps.length > 1;
+  const wantsMasks = inputs.activeMasks.length > 0;
+  const wantsText = inputs.cues.length > 0;
+
+  const seen = new Set<string>();
+  return RENDER_ATTEMPTS.map((a) => ({
+    ...a,
+    look: wantsLook ? a.look !== false : false,
+    transitions: wantsTransition ? a.transitions !== false : false,
+    cuts: wantsCuts ? a.cuts : false,
+    masks: wantsMasks ? a.masks : false,
+    text: wantsText ? a.text : false,
+    voice: inputs.hasVoice ? a.voice : false,
+  })).filter((a) => {
+    const key = `${a.masks}|${a.text}|${a.voice}|${a.cuts}|${a.look}|${a.transitions}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 export async function renderWithFallback(
   ff: FFmpeg,
   inputs: GraphInputs,
@@ -167,37 +214,16 @@ export async function renderWithFallback(
 
   let lastLogs = "";
 
-  // Normalise les tentatives selon les options reellement demandees, puis
-  // retire les doublons : sans cela, on encoderait plusieurs fois le meme
-  // graphe (par exemple « complet » et « sans transitions » quand aucune
-  // transition n'est demandee).
-  const wantsLook = (inputs.filterId ?? "none") !== "none" || (inputs.upscale ?? "none") !== "none";
-  const wantsTransition = (inputs.transition ?? "none") !== "none" && inputs.keeps.length > 1;
-
-  const seen = new Set<string>();
-  const attempts = RENDER_ATTEMPTS.map((a) => ({
-    ...a,
-    look: wantsLook ? a.look !== false : false,
-    transitions: wantsTransition ? a.transitions !== false : false,
-  })).filter((a) => {
-    const key = `${a.masks}|${a.text}|${a.voice}|${a.cuts}|${a.look}|${a.transitions}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
+  const attempts = planAttempts(inputs);
 
   for (const attempt of attempts) {
     signal?.throwIfAborted();
-
-    if (attempt.masks && !inputs.activeMasks.length) continue;
-    if (attempt.voice && !inputs.hasVoice) continue;
-    if (attempt.cuts && inputs.keeps.length < 2) continue;
 
     const useVoice = attempt.voice && inputs.hasVoice;
     const graph = buildGraph(inputs, { ...attempt, voice: useVoice });
 
     // Écarte les graphes syntaxiquement invalides sans payer l'encodage.
-    if (!(await validateGraph(ff, graph, useVoice))) {
+    if (!(await validateGraph(ff, graph, useVoice, inputName))) {
       // Sans cette trace, une degradation restait inexplicable : l'utilisateur
       // lisait « filtre visuel non applique » sans jamais savoir pourquoi.
       console.warn(

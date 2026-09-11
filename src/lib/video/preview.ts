@@ -126,7 +126,11 @@ export async function renderPreviewFrame(
   signal?.throwIfAborted();
 
   const input = "preview-in.mp4";
-  const output = "preview-out.jpg";
+  // PNG, et non JPEG : l'encodeur mjpeg de ce cœur WebAssembly fait tomber tout
+  // l'onglet (le processus de rendu « crashe », sans exception rattrapable —
+  // constaté sur Chrome 146 avec `-q:v 3 out.jpg`, alors que le même graphe en
+  // PNG rend code 0). L'aperçu vaut mieux partiel qu'inexistant.
+  const output = "preview-out.png";
   const textFile = "preview-text.txt";
 
   // Copie imperative : le meme `videoBytes` sera reutilise au prochain
@@ -181,8 +185,6 @@ export async function renderPreviewFrame(
       ...buildPreviewArgs(rects, chain, lookChain, maskStrength),
       "-frames:v",
       "1",
-      "-q:v",
-      "3",
       output,
     ];
 
@@ -191,7 +193,7 @@ export async function renderPreviewFrame(
 
     const bytes = (await ff.readFile(output)) as Uint8Array;
     // `slice()` detache la vue du tas WASM, qui sera reutilise.
-    return URL.createObjectURL(new Blob([bytes.slice()], { type: "image/jpeg" }));
+    return URL.createObjectURL(new Blob([bytes.slice()], { type: "image/png" }));
   } finally {
     for (const name of [input, output, textFile]) {
       try {
