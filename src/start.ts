@@ -1,4 +1,4 @@
-import { createStart, createMiddleware } from "@tanstack/react-start";
+import { createCsrfMiddleware, createStart, createMiddleware } from "@tanstack/react-start";
 import { getRequest } from "@tanstack/react-start/server";
 import { z } from "zod";
 
@@ -77,6 +77,18 @@ const errorMiddleware = createMiddleware().server(async ({ next }) => {
   }
 });
 
+const csrfMiddleware = createCsrfMiddleware({
+  // Seules les server functions comptent : ce sont des POST qui portent un
+  // effet de bord payant (transcription ElevenLabs, traduction, synthèse).
+  //
+  // Sans ce middleware, une page extérieure peut faire dépenser le quota d'une
+  // clef depuis le navigateur d'un visiteur : la reponse n'est pas lisible
+  // (pas de CORS), mais l'appel a lieu et se facture. Constaté ici même avant
+  // correctif : rejouer l'appel avec `Origin: https://attaquant.example` ou
+  // `Sec-Fetch-Site: cross-site` renvoyait 200 comme un appel legitime.
+  filter: (ctx) => ctx.handlerType === "serverFn",
+});
+
 export const startInstance = createStart(() => ({
-  requestMiddleware: [errorMiddleware],
+  requestMiddleware: [csrfMiddleware, errorMiddleware],
 }));

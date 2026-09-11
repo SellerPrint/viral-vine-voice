@@ -38,6 +38,10 @@ function crossOriginIsolation() {
 export default defineConfig({
   vite: {
     plugins: [crossOriginIsolation()],
+    // L'environnement de prévisualisation proxifie le serveur sur un hôte
+    // dynamique (`<port>-<id>.e2b.app`) que Vite refuserait sans cela.
+    server: { allowedHosts: true },
+    preview: { allowedHosts: true },
     // Ces deux paquets embarquent un .wasm de 30+ Mo : les pré-bundler à
     // chaque démarrage ne sert à rien, ils sont chargés à la demande.
     optimizeDeps: { exclude: ["@ffmpeg/core", "@ffmpeg/core-mt"] },
