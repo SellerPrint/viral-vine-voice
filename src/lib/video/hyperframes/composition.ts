@@ -12,6 +12,22 @@
 
 import type { Cue } from "../subtitles/cues";
 
+/**
+ * Échappe un fragment de texte pour insertion dans du HTML.
+ *
+ * Le texte des sous-titres vient d'un LLM et de la vidéo source : sans
+ * échappement, un `<script>` dans une transcription s'exécuterait tel quel
+ * dans la composition rendue.
+ */
+function escapeHtmlText(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 export type HyperFramesPreset = {
   id: string;
   name: string;
@@ -246,7 +262,8 @@ export function generateHyperFramesComposition(
       if (preset.wordByWord) {
         const wordsHTML = el.words
           .map(
-            (word, i) => `<span id="${el.id}-word-${i}" class="subtitle-word">${word.text}</span>`,
+            (word, i) =>
+              `<span id="${el.id}-word-${i}" class="subtitle-word">${escapeHtmlText(word.text)}</span>`,
           )
           .join(" ");
 
@@ -257,7 +274,7 @@ export function generateHyperFramesComposition(
         </div>`;
       } else {
         return `<div id="${el.id}" class="subtitle-word" style="position: absolute; bottom: 15%; left: 0; right: 0; text-align: center;">
-          ${el.text}
+          ${escapeHtmlText(el.text)}
         </div>`;
       }
     })
@@ -331,7 +348,7 @@ export function generateCSSOnlyComposition(
       const wordsHTML = el.words
         .map(
           (word, i) =>
-            `<span class="subtitle-word" style="animation-delay: ${i * 0.08}s;">${word.text}</span>`,
+            `<span class="subtitle-word" style="animation-delay: ${i * 0.08}s;">${escapeHtmlText(word.text)}</span>`,
         )
         .join(" ");
 
