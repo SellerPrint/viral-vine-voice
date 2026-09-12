@@ -301,7 +301,102 @@ export function couperAuRythme(projet, entrees = {}) {
 /* cadres, style, options                                                      */
 /* -------------------------------------------------------------------------- */
 
-export function reglerCadre(projet, entrees = {}) {
+/* -------------------------------------------------------------------------- */
+/* cles d'entree                                                               */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Les noms du fichier de configuration de l'atelier, acceptes en alias.
+ *
+ * Un modele lit `wordByWord` dans `options` et `fontsize` dans `subtitle` : il
+ * les renverra tels quels. Sans passerelle, il faudrait tout deviner ; avec,
+ * le silence reste impossible — une cle qui ne correspond a rien leve une
+ * erreur nommee, au lieu d'etre ignoree et de laisser croire que le reglage
+ * est passe.
+ */
+const ALIAS_CHAMPS = {
+  // cadres
+  largeur: "w",
+  hauteur: "h",
+  bord_gauche: "x",
+  bord_haut: "y",
+  enabled: "actif",
+  active: "actif",
+  // style
+  fontsize: "corps",
+  yAnchor: "ancrage",
+  uppercase: "majuscules",
+  maxCharsPerLine: "charsParLigne",
+  maxLines: "lignesMax",
+  fontColor: "couleurTexte",
+  boxColor: "couleurFond",
+  boxOpacity: "opaciteFond",
+  // options
+  wordByWord: "motParMot",
+  removeOriginalAudio: "retirerSonOriginal",
+  cutSilences: "couperSilences",
+  mirror: "miroir",
+  ttsProvider: "fournisseurVoix",
+  maskStrength: "forceMasque",
+  transitionDuration: "dureeTransition",
+  filterId: "filtre",
+  ambienceLevel: "niveauAmbiance",
+  subtitleOpacity: "opaciteFond",
+  sourceLanguage: "langueSource",
+  targetLanguage: "langueCible",
+};
+
+const CHAMPS_PAR_OUTIL = {
+  reglerCadre: ["id", "x", "y", "w", "h", "actif"],
+  ajouterCadre: ["id", "label", "x", "y", "w", "h", "actif"],
+  reglerStyle: [
+    "preset",
+    "corps",
+    "ancrage",
+    "majuscules",
+    "charsParLigne",
+    "lignesMax",
+    "couleurTexte",
+    "couleurFond",
+    "opaciteFond",
+  ],
+  reglerOptions: [
+    "motParMot",
+    "retirerSonOriginal",
+    "couperSilences",
+    "miroir",
+    "fournisseurVoix",
+    "forceMasque",
+    "transition",
+    "dureeTransition",
+    "filtre",
+    "upscale",
+    "niveauAmbiance",
+    "opaciteFond",
+    "qualite",
+    "langueSource",
+    "langueCible",
+  ],
+};
+
+/** Remet chaque entree sous le nom que l'operation lit, ou le dit. */
+export function entreesPropres(outil, entrees = {}) {
+  const autorisees = CHAMPS_PAR_OUTIL[outil];
+  const out = {};
+  for (const [cle, valeur] of Object.entries(entrees ?? {})) {
+    const cible = autorisees.includes(cle) ? cle : ALIAS_CHAMPS[cle];
+    if (cible === undefined || !autorisees.includes(cible)) {
+      throw new RangeError(
+        `${outil} : cle « ${cle} » inconnue — acceptees : ${autorisees.join(", ")}`,
+      );
+    }
+    out[cible] = valeur;
+  }
+  return out;
+}
+
+export function reglerCadre(projet, brut = {}) {
+  const entrees = entreesPropres("reglerCadre", brut);
   const index = projet.cadres.findIndex((c) => c.id === entrees.id);
   if (index < 0) {
     throw new RangeError(
@@ -343,7 +438,8 @@ export function reglerCadre(projet, entrees = {}) {
   return { projet: { ...projet, cadres }, tords };
 }
 
-export function ajouterCadre(projet, entrees = {}) {
+export function ajouterCadre(projet, brut = {}) {
+  const entrees = entreesPropres("ajouterCadre", brut);
   if (projet.cadres.length >= MAX_CADRES) throw new RangeError(`${MAX_CADRES} cadres au plus`);
   const cadre = {
     id: chaine(entrees.id, "id", 40) ?? identifiant("cadre"),
@@ -360,7 +456,8 @@ export function ajouterCadre(projet, entrees = {}) {
 }
 
 /** Surcharges de style : `null` rend la main au préréglage, comme dans l'app. */
-export function reglerStyle(projet, entrees = {}) {
+export function reglerStyle(projet, brut = {}) {
+  const entrees = entreesPropres("reglerStyle", brut);
   let courant = projet;
   // Changer de préréglage remet la typographie à zéro, comme dans l'atelier
   // (`patch({ presetId, overrides: {} })`) : sinon l'ancien corps survit sous le
@@ -420,7 +517,8 @@ export function reglerStyle(projet, entrees = {}) {
   };
 }
 
-export function reglerOptions(projet, entrees = {}) {
+export function reglerOptions(projet, brut = {}) {
+  const entrees = entreesPropres("reglerOptions", brut);
   const options = { ...projet.options };
   const booleens = ["motParMot", "retirerSonOriginal", "couperSilences", "miroir"];
   for (const cle of booleens) if (entrees[cle] !== undefined) options[cle] = Boolean(entrees[cle]);

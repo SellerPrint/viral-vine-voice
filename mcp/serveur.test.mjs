@@ -536,3 +536,48 @@ describe("le fil MCP", () => {
     }
   });
 });
+
+describe("les clés que les outils acceptent", () => {
+  it("reconnaît les noms du fichier de configuration, en alias", () => {
+    // Un modèle lit `wordByWord` et `fontsize` dans le fichier exporté par
+    // l'atelier : il les renverra tels quels. La passerelle est là pour ça.
+    const base = nouveauProjet({ duree: 12 });
+    const style = reglerStyle(base, { fontsize: 90, uppercase: true, boxOpacity: 0.4 });
+    expect(style.projet.style.surcharges).toMatchObject({ fontsize: 90, uppercase: true });
+    expect(style.projet.options.opaciteFond).toBeCloseTo(0.4, 2);
+    const cadre = reglerCadre(base, { id: "bottom", largeur: 1, hauteur: 0.16 });
+    expect(cadre.projet.cadres.find((c) => c.id === "bottom")).toMatchObject({ w: 1, h: 0.16 });
+    const options = reglerOptions(base, { wordByWord: true, maskStrength: "strong" });
+    expect(options.options).toMatchObject({ motParMot: true, forceMasque: "strong" });
+  });
+
+  it("nomme la clé inventée au lieu de l'ignorer", () => {
+    // Une clé ignorée en silence, c'est un réglage que le modèle croit passé et
+    // que l'export ne montre jamais — la classe même de plainte que l'atelier a
+    // entendue côté souris.
+    const base = nouveauProjet({ duree: 12 });
+    expect(() => reglerStyle(base, { taillePolice: 80 })).toThrow(/« taillePolice » inconnue/);
+    expect(() => reglerStyle(base, { taillePolice: 80 })).toThrow(/acceptees : preset, corps/);
+    expect(() => reglerOptions(base, { bitrate: 8000 })).toThrow(/« bitrate » inconnue/);
+    expect(() => reglerCadre(base, { id: "bottom", volume: 0.5 })).toThrow(/« volume » inconnue/);
+  });
+
+  it("le serveur rend la clé inconnue lisible, sans casser la session", async () => {
+    const client = branche();
+    try {
+      await client.outil("nouveau_projet", { duree: 12 });
+      const appel = await client.outil("regler_cadres", {
+        cadres: [{ id: "bottom", volume: 0.5 }],
+      });
+      expect(appel.isError).toBe(true);
+      expect(appel.donnees.refus).toMatch(/« volume » inconnue/);
+      // la session tient : l'outil suivant passe, et le cadre n'a pas bougé
+      const suite = await client.outil("etat", {});
+      expect(suite.isError).toBe(false);
+      const bas = suite.donnees.etat.cadres.find((c) => c.id === "bottom");
+      expect(bas.w).toBeGreaterThan(0);
+    } finally {
+      client.fermer();
+    }
+  });
+});

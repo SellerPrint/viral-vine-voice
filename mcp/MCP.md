@@ -62,6 +62,21 @@ npm run mcp -- --outils   # liste le contrat des 17 outils
 | `exporter_config`     | le fichier `.json` que l'atelier importe                                         |
 | `importer_config`     | reprendre un montage déjà exporté pour le poursuivre                             |
 
+## Les clés que les outils acceptent
+
+Chaque outil ne lit que les noms qu'il annonce dans son `inputSchema` — et, en
+plus, **les noms du fichier de configuration de l'atelier** : `fontsize`,
+`yAnchor`, `uppercase`, `boxOpacity`, `wordByWord`, `maskStrength`,
+`transitionDuration`, `boxColor`, `fontColor`, `enabled`, `largeur`, `hauteur`.
+C'est ce qu'un modèle retrouve en relisant `viraldub-config.json`, donc il peut
+le renvoyer tel quel.
+
+Une clé qui ne correspond à rien **n'est jamais ignorée** : l'outil répond en
+`isError` avec `{"refus": "reglerStyle : clé « bitrate » inconnue — acceptées :
+…"}` et la session continue. Un réglage que le modèle croit passé et que
+l'export ne montre pas est le pire des bugs, c'est pour ça que le silence est
+interdit ici.
+
 ## Ordre qui marche
 
 1. `etat` — savoir où on met les pieds (durée du plan, ce qui est déjà posé).
