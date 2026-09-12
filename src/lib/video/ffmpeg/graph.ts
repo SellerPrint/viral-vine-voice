@@ -195,7 +195,10 @@ function buildTextFilters(inputs: GraphInputs, withCuts: boolean): string {
       if (coverMask) {
         filters.push(
           // `h` dans drawbox = hauteur de la boîte (auto-référence) : il faut `ih`.
-          `drawbox=x=0:y=ih*${coverMask.y.toFixed(3)}:w=iw:h=ih*${coverMask.h.toFixed(3)}:color=${plateColor}:t=fill:${enable}`,
+          // x et w viennent du cadre : sans eux, les poignées de largeur de la
+          // scène ne gouvernaient rien du tout — on voyait la boîte se réduire
+          // dans l'éditeur et la plaque sortir pleine largeur du rendu.
+          `drawbox=x=iw*${coverMask.x.toFixed(3)}:y=ih*${coverMask.y.toFixed(3)}:w=iw*${coverMask.w.toFixed(3)}:h=ih*${coverMask.h.toFixed(3)}:color=${plateColor}:t=fill:${enable}`,
         );
       }
 

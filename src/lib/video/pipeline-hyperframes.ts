@@ -22,7 +22,14 @@ import { getFfmpeg, writeFileSafe } from "./ffmpeg-client";
 import { loadFont } from "./font";
 import { resolveMasks, type GraphInputs } from "./ffmpeg/graph";
 import { renderWithFallback } from "./ffmpeg/render";
-import { DEFAULT_MASKS, SUBTITLE_PRESETS, resolvePreset, type PipelineOptions } from "./presets";
+import {
+  DEFAULT_MASKS,
+  SUBTITLE_PRESETS,
+  ancreLegende,
+  cadreCouvrant,
+  resolvePreset,
+  type PipelineOptions,
+} from "./presets";
 import { remapTimeWithTransitions, transitionDurations } from "./transitions";
 import { buildCues, groupWordsToSegments, wrapLines, type Segment } from "./subtitles/cues";
 
@@ -237,10 +244,8 @@ export async function runPipeline(
 
     const activeMasks = resolveMasks(masks, videoWidth, videoHeight);
 
-    const coverMask = masks.find((m) => m.enabled && (m.id === "bottom" || m.id === "top"));
-    const subYAnchor = coverMask
-      ? Math.min(0.94, Math.max(0.06, coverMask.y + coverMask.h / 2))
-      : preset.yAnchor;
+    const coverMask = cadreCouvrant(masks);
+    const subYAnchor = ancreLegende(masks, preset.yAnchor);
 
     if (voiceWav) {
       cleanupNames.add("voice.wav");

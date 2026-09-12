@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 
 import { getFilter } from "@/lib/video/filters";
 import { formatClock } from "@/lib/editor/edl";
-import type { MaskZone } from "@/lib/video/presets";
+import { ancreLegende, type MaskZone } from "@/lib/video/presets";
 import { clampZone } from "@/lib/editor/project";
 
 import { isSelected } from "@/lib/editor/store";
@@ -39,6 +39,31 @@ type DragState = {
   /** Zones entraînées par le geste, saisies à leur position de départ. */
   groupe?: { id: string; x: number; y: number }[];
 } | null;
+
+/** Le bord que tire cette poignée est-il déjà plaqué contre le cadre ? */
+const BORDS_PAROIGNEE: Record<string, readonly ("gauche" | "droite" | "haut" | "bas")[]> = {
+  nw: ["gauche", "haut"],
+  n: ["haut"],
+  ne: ["droite", "haut"],
+  e: ["droite"],
+  se: ["droite", "bas"],
+  s: ["bas"],
+  sw: ["gauche", "bas"],
+  w: ["gauche"],
+};
+
+function bordPlaque(zone: MaskZone, coin: string) {
+  const EPS = 0.002;
+  const bords = {
+    gauche: zone.x <= EPS,
+    droite: zone.x + zone.w >= 1 - EPS,
+    haut: zone.y <= EPS,
+    bas: zone.y + zone.h >= 1 - EPS,
+  };
+  // Une poignée d'angle est libre tant qu'un seul de ses deux bords peut jouer :
+  // sinon on éteindrait l'angle d'une zone collée à un bord mais pas à l'autre.
+  return (BORDS_PAROIGNEE[coin] ?? []).every((bord) => bords[bord]);
+}
 
 export function PreviewStage() {
   const { project, ui, derived, dispatch, state } = useEditor();
@@ -132,6 +157,9 @@ export function PreviewStage() {
   }, [ui.playing, ui.playhead, source, derived.removed, derived.keeps, dispatch]);
 
   /* --------------------------- glisser des masques -------------------------- */
+  const gesteVue = useRef(false);
+  const cadreDeplace = useRef(false);
+
   const beginDrag = useCallback(
     (event: React.PointerEvent, zone: MaskZone, mode: NonNullable<DragState>["mode"]) => {
       event.stopPropagation();
@@ -146,6 +174,12 @@ export function PreviewStage() {
       // La sélection se recalcule ici et non via `toggleSelect` : le geste a
       // besoin des positions de départ des zones entraînées dans la seconde
       // même que l'appui est reçu.
+      // Deux témoins de geste : le curseur a-t-il quitté le point d'appui, et
+      // la zone a-t-elle bougé pour autant. Les deux ensemble disent le seul cas
+      // où l'utilisateur a l'impression que rien ne répond.
+      gesteVue.current = false;
+      cadreDeplace.current = false;
+
       const additif = event.shiftKey || event.ctrlKey || event.metaKey;
       const dejaPrise = isSelected(state.selection, "mask", zone.id);
       const groupe = state.selection?.kind === "mask" ? state.selection.ids : [];
@@ -217,10 +251,26 @@ export function PreviewStage() {
         drag.mode === "move" && drag.groupe ? new Map(drag.groupe.map((g) => [g.id, g])) : null;
       const pas = { x: zone.x - drag.origin.x, y: zone.y - drag.origin.y };
 
+      if (Math.abs(event.clientX - drag.startX) + Math.abs(event.clientY - drag.startY) > 3) {
+        gesteVue.current = true;
+      }
+
       dispatch({
         type: "setMasks",
         masks: project.masks.map((m) => {
-          if (m.id === drag.id) return clampZone({ ...m, ...zone });
+          if (m.id === drag.id) {
+            const applique = clampZone({ ...m, ...zone });
+            if (
+              Math.abs(applique.x - drag.origin.x) +
+                Math.abs(applique.y - drag.origin.y) +
+                Math.abs(applique.w - drag.origin.w) +
+                Math.abs(applique.h - drag.origin.h) >
+              0.0005
+            ) {
+              cadreDeplace.current = true;
+            }
+            return applique;
+          }
           const base = groupe?.get(m.id);
           if (base) return clampZone({ ...m, x: base.x + pas.x, y: base.y + pas.y });
           return m;
@@ -229,6 +279,16 @@ export function PreviewStage() {
       });
     };
     const onUp = () => {
+      // Le geste a eu lieu, la zone n'a pas bougé d'un pixel : c'est le bord du
+      // cadre qui la retient. Sans ce mot, le geste ressemble à une interface
+      // morte — et c'est exactement le reproche reçu.
+      if (gesteVue.current && !cadreDeplace.current) {
+        actions.notify({
+          kind: "info",
+          text: "La zone touche un bord du cadre : elle ne peut pas s'en écarter. Glisse le bord opposé, ou ramène-la d'abord vers l'intérieur.",
+        });
+      }
+      gesteVue.current = false;
       setDrag(null);
       actions.endGesture();
     };
@@ -257,7 +317,10 @@ export function PreviewStage() {
       fontSize: `${Math.max(9, fontsize * (scale || 1))}px`,
       color: preset.fontColor === "white" ? "#fff" : preset.fontColor,
       textTransform: preset.uppercase ? "uppercase" : "none",
-      top: `${preset.yAnchor * 100}%`,
+      // La même règle que les trois pipelines : le centre du cadre couvrant,
+      // à défaut du réglage du style. C'est ce qui fait qu'étirer la hauteur du
+      // bandeau à la souris déplace bel et bien le texte incrusté.
+      top: `${ancreLegende(project.masks, preset.yAnchor) * 100}%`,
       letterSpacing: `${0.4 * (scale || 1)}px`,
       lineHeight: 1.1,
       ...(preset.borderW
@@ -372,6 +435,11 @@ export function PreviewStage() {
                             key={corner}
                             className="ed-mask-handle"
                             data-corner={corner}
+                            // Un bord collé au cadre ne peut pas s'en écarter : le
+                            // geste y est vide. Le dire vaut mieux qu'un curseur qui
+                            // insistait — c'est ce qui faisait dire « impossible de
+                            // déplacer » à une zone qui ne demandait qu'à rentrer.
+                            data-pinned={bordPlaque(zone, corner) || undefined}
                             onPointerDown={(event) => beginDrag(event, zone, corner)}
                           />
                         ))}

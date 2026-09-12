@@ -1,15 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import { EMPTY_PROJECT, makeClip, projectPreset } from "./project";
+import { ancreLegende } from "@/lib/video/presets";
 import type { MaskZone } from "@/lib/video/presets";
-import {
-  createEditorState,
-  editorReducer,
-  MIN_CLIP,
-  ZONE_SOUS_TITRES,
-  type Action,
-  type EditorState,
-} from "./store";
+import { createEditorState, editorReducer, MIN_CLIP, type Action, type EditorState } from "./store";
 import type { Clip, Project, SourceMedia } from "./types";
 
 /**
@@ -495,35 +489,40 @@ describe("sélection multiple", () => {
 });
 
 describe("bandeau des sous-titres et ancre de la légende", () => {
-  const bande = (y: number): MaskZone => ({
-    id: ZONE_SOUS_TITRES,
-    label: "Sous-titres FR (bas)",
+  const bande = (y: number, h = 0.14, id = "bottom"): MaskZone => ({
+    id,
+    label: id === "bottom" ? "Sous-titres FR (bas)" : "Sous-titres FR (haut)",
     x: 0,
     y,
     w: 1,
-    h: 0.14,
+    h,
     enabled: true,
   });
   const avecBande = () => state({ project: { masks: [bande(0.82)] } });
 
-  it("tirer le bandeau vers le haut monte la légende du même écart", () => {
+  it("tirer le bandeau ne réécrit pas l'ancre : c'est le cadre qui dicte", () => {
+    // L'aperçu et les trois pipelines calculent l'ancre depuis le centre du
+    // cadre couvrant. Écrire la même grandeur à deux endroits la ferait
+    // s'entredétruire entre le rail et l'inspecteur.
     const start = avecBande();
     const ancre = projectPreset(p(start)).yAnchor;
     const next = run(start, { type: "setMasks", masks: [bande(0.72)] });
-    expect(projectPreset(p(next)).yAnchor).toBeCloseTo(ancre - 0.1, 4);
+    expect(projectPreset(p(next)).yAnchor).toBe(ancre);
+    // Et la légende a bien suivi, d'autant que le centre du cadre a bougé.
+    expect(ancreLegende(p(next).masks, ancre)).toBeCloseTo(0.72 + 0.14 / 2, 4);
+    expect(ancreLegende(p(start).masks, ancre)).toBeCloseTo(0.82 + 0.14 / 2, 4);
   });
 
-  it("régler la légende dans le style fait suivre le bandeau", () => {
+  it("régler la légende dans le style recentre le bandeau sur l'ancre", () => {
     const start = avecBande();
-    const ancre = projectPreset(p(start)).yAnchor;
-    const monte = run(start, { type: "patch", patch: { overrides: { yAnchor: ancre - 0.05 } } });
-    expect(p(monte).masks[0].y).toBeCloseTo(0.77, 4);
+    const monte = run(start, { type: "patch", patch: { overrides: { yAnchor: 0.6 } } });
+    expect(p(monte).masks[0].y).toBeCloseTo(0.6 - 0.07, 4);
 
-    // Vers le bas, c'est la borne du cadre qui gagne : la zone ne se laisse
-    // pas pousser à moitié hors de l'image, et l'ancre reste celle demandée.
-    const descendu = run(start, { type: "patch", patch: { overrides: { yAnchor: ancre + 0.05 } } });
+    // Le bandeau ne se laisse pas pousser à moitié hors de l'image ; l'ancre
+    // demandée reste inscrite au projet, telle que le style l'a voulue.
+    const descendu = run(start, { type: "patch", patch: { overrides: { yAnchor: 0.99 } } });
     expect(p(descendu).masks[0].y).toBeCloseTo(1 - 0.14, 4);
-    expect(projectPreset(p(descendu)).yAnchor).toBeCloseTo(ancre + 0.05, 4);
+    expect(projectPreset(p(descendu)).yAnchor).toBeCloseTo(0.99, 4);
   });
 
   it("un geste qui change les deux à la fois est respecté tel quel", () => {
@@ -538,10 +537,22 @@ describe("bandeau des sous-titres et ancre de la légende", () => {
     expect(projectPreset(p(next)).yAnchor).toBe(0.2);
   });
 
-  it("une zone qui ne bouge pas verticaement ne touche pas à la légende", () => {
-    const start = avecBande();
+  it("sans cadre couvrant actif, le curseur d'ancre ne déplace rien", () => {
+    const start = state({
+      project: { masks: [{ ...bande(0.82), enabled: false }, bande(0.1, 0.1, "other")] },
+    });
     const ancre = projectPreset(p(start)).yAnchor;
-    const next = run(start, { type: "setMasks", masks: [{ ...bande(0.82), h: 0.2 }] });
-    expect(projectPreset(p(next)).yAnchor).toBeCloseTo(ancre, 6);
+    const next = run(start, { type: "patch", patch: { overrides: { yAnchor: ancre - 0.05 } } });
+    expect(p(next).masks[0].y).toBe(0.82);
+    expect(p(next).masks[1].y).toBe(0.1);
+  });
+
+  it("le bandeau du haut commande la légende à l'identique", () => {
+    // `cadreCouvrant` retient le bas en priorité, le haut à défaut : la règle
+    // d'ancrage doit suivre le cadre réellement retenu, pas un id en dur.
+    const haut = state({ project: { masks: [bande(0.02, 0.12, "top")] } });
+    const next = run(haut, { type: "patch", patch: { overrides: { yAnchor: 0.2 } } });
+    expect(p(next).masks[0].y).toBeCloseTo(0.2 - 0.06, 4);
+    expect(ancreLegende(p(next).masks, 0.9)).toBeCloseTo(0.2, 4);
   });
 });

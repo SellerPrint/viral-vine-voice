@@ -4,10 +4,11 @@ import { resolveMasks, type GraphInputs } from "@/lib/video/ffmpeg/graph";
 import { renderWithFallback } from "@/lib/video/ffmpeg/render";
 import { wrapLines, type Cue } from "@/lib/video/subtitles/cues";
 import { remapTimeWithTransitions, transitionDurations } from "@/lib/video/transitions";
+import { ancreLegende, cadreCouvrant } from "@/lib/video/presets";
 import { exactArrayBuffer } from "@/lib/base64";
 
 import { projectKeeps, projectPreset } from "./project";
-import { clamp, type Range } from "./edl";
+import { type Range } from "./edl";
 import { QUALITY_PRESETS, type Project } from "./types";
 
 /**
@@ -83,10 +84,8 @@ export async function renderProjectLocally(
     const width = source.width;
     const height = source.height;
     const activeMasks = resolveMasks(project.masks, width, height);
-    const coverMask = project.masks.find((m) => m.enabled && (m.id === "bottom" || m.id === "top"));
-    const subYAnchor = coverMask
-      ? clamp(coverMask.y + coverMask.h / 2, 0.06, 0.94)
-      : preset.yAnchor;
+    const coverMask = cadreCouvrant(project.masks);
+    const subYAnchor = ancreLegende(project.masks, preset.yAnchor);
 
     const transition = project.transition;
     const transitionSeconds = project.transitionDuration;

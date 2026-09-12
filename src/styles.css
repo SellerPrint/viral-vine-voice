@@ -1648,6 +1648,13 @@ input[type="range"].ed-slider::-moz-range-thumb {
   border-radius: calc(3px * var(--ed-ui));
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5);
 }
+/* Une poignée dont le bord est plaqué contre le cadre ne peut rien élargir :
+   elle reste dessinée (elle dit où est le bord) mais ne promet plus un geste
+   qu'elle ne tiendrait pas. */
+.ed-mask-handle[data-pinned="true"] {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
 .ed-mask-handle::after {
   content: "";
   position: absolute;

@@ -842,3 +842,92 @@ test("l'import ne dépend pas d'un volet replié", async ({ page }) => {
     timeout: 30_000,
   });
 });
+
+test("un bord plaqué contre le cadre se voit, et le geste muet s'explique", async ({ page }) => {
+  await openDemoWithMasks(page);
+
+  // Le reproche : « impossible de les déplacer ». Le logo du haut à droite est
+  // collé au bord droit du cadre — le tirer vers la droite ne peut rien donner.
+  // Ce n'est pas une interface morte, c'est une bordure : elle doit se lire.
+  const logoDroit = page.locator(".ed-mask").nth(2);
+  await expect(logoDroit.locator('.ed-mask-handle[data-corner="e"]')).toHaveAttribute(
+    "data-pinned",
+    "true",
+  );
+  await expect(logoDroit.locator('.ed-mask-handle[data-corner="w"]')).not.toHaveAttribute(
+    "data-pinned",
+    "true",
+  );
+
+  const gauche = () => logoDroit.evaluate((el) => parseFloat(el.style.left));
+
+  // Vers l'extérieur : rien ne bouge, et le monteur le dit.
+  const avant = await gauche();
+  const corps = await logoDroit.boundingBox();
+  await page.mouse.move(corps!.x + corps!.width / 2, corps!.y + corps!.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(corps!.x + corps!.width / 2 + 60, corps!.y + corps!.height / 2, {
+    steps: 8,
+  });
+  await page.mouse.up();
+  expect(await gauche()).toBeCloseTo(avant, 3);
+  await expect(page.getByTestId("notice")).toContainText(/bord du cadre/i);
+
+  // Vers l'intérieur : ça part.
+  await page.waitForTimeout(3200);
+  const tenu = await logoDroit.boundingBox();
+  await page.mouse.move(tenu!.x + tenu!.width / 2, tenu!.y + tenu!.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(tenu!.x + tenu!.width / 2 - 70, tenu!.y + tenu!.height / 2, { steps: 8 });
+  await page.mouse.up();
+  await page.waitForTimeout(250);
+  expect(await gauche()).toBeLessThan(avant - 10);
+});
+
+test("les tailles varient : largeur du bandeau, hauteur, et la légende suit", async ({ page }) => {
+  await openDemoWithMasks(page);
+
+  // Une légende affichée, pour mesurer ce que le cadre lui fait.
+  const coupes = await page.locator('[data-lane="cuts"]').boundingBox();
+  await page.mouse.click(coupes!.x + 40, coupes!.y + coupes!.height / 2);
+  await page.waitForTimeout(500);
+  const titre = page.locator(".ed-subtitle");
+  await expect(titre).toBeVisible();
+
+  const bande = page.locator(".ed-mask").first();
+  const mesure = () =>
+    page.evaluate(() => {
+      const z = document.querySelector<HTMLElement>(".ed-mask")!;
+      const t = document.querySelector<HTMLElement>(".ed-subtitle")!;
+      return {
+        largeur: parseFloat(z.style.width),
+        hauteur: parseFloat(z.style.height),
+        haut: t.getBoundingClientRect().top,
+      };
+    });
+
+  const avant = await mesure();
+
+  // 1) Poignée est ramenée vers l'intérieur : le bandeau se rétrécit.
+  const bord = await bande.boundingBox();
+  await page.mouse.move(bord!.x + bord!.width, bord!.y + bord!.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(bord!.x + bord!.width - 80, bord!.y + bord!.height / 2, { steps: 8 });
+  await page.mouse.up();
+  await page.waitForTimeout(250);
+  const apresLargeur = await mesure();
+  expect(apresLargeur.largeur).toBeLessThan(avant.largeur - 8);
+
+  // 2) Poignée sud étirée vers le bas : la hauteur varie, et la légende descend
+  //    avec — le moteur cale le texte sur le centre du cadre, la scène aussi.
+  const bord2 = await bande.boundingBox();
+  const bas = await mesure();
+  await page.mouse.move(bord2!.x + bord2!.width / 2, bord2!.y + bord2!.height);
+  await page.mouse.down();
+  await page.mouse.move(bord2!.x + bord2!.width / 2, bord2!.y + bord2!.height + 40, { steps: 8 });
+  await page.mouse.up();
+  await page.waitForTimeout(300);
+  const apresHauteur = await mesure();
+  expect(apresHauteur.hauteur).toBeGreaterThan(bas.hauteur + 1);
+  expect(apresHauteur.haut).toBeGreaterThan(bas.haut + 8);
+});

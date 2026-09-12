@@ -223,6 +223,17 @@ describe("masquage du sous-titre d'origine (régressions)", () => {
     expect(graph).toContain("drawbox=");
   });
 
+  it("borne la plaque par la largeur et la position du cadre", () => {
+    // Les poignées de la scène réduisent le bandeau en x et en w : si la plaque
+    // restait `x=0:w=iw`, l'aperçu promettait un carcan et le rendu sortait en
+    // pleine largeur — le geste de l'utilisateur ne servait à rien.
+    const etroit = { ...cover, x: 0.1, w: 0.6 };
+    const graph = buildGraph(baseInputs({ coverMask: etroit }), allOn);
+    expect(graph).toContain("drawbox=x=iw*0.100:y=ih*0.800:w=iw*0.600:h=ih*0.150");
+    const pleine = buildGraph(baseInputs({ coverMask: cover }), allOn);
+    expect(pleine).toContain("drawbox=x=iw*0.000:y=ih*0.800:w=iw*1.000:h=ih*0.150");
+  });
+
   it("exprime la plaque en `ih` et jamais en `h` (auto-référence drawbox)", () => {
     const graph = buildGraph(baseInputs({ coverMask: cover }), allOn);
     const box = graph.match(/drawbox=[^,;]*(?:\\,[^,;]*)*/g) ?? [];

@@ -20,7 +20,7 @@ import {
   undo,
   type History,
 } from "./history";
-import type { MaskZone } from "@/lib/video/presets";
+import { cadreCouvrant, type MaskZone } from "@/lib/video/presets";
 import type { Clip, Project } from "./types";
 
 /**
@@ -318,47 +318,41 @@ function push(state: EditorState, project: Project, mergeKey?: string): EditorSt
 }
 
 /**
- * Le bandeau « Sous-titres FR (bas) » et l'ancre verticale de la légende sont
- * un seul réglage vu de deux endroits.
+ * Le curseur d'ancrage du style déplace le bandeau, jamais l'inverse.
  *
- * Sans ce lien, le geste le plus naturel de l'atelier était cassé : on tirait
- * le cadre à l'écran, la zone de flou suivait, mais le texte incrusté restait
- * cloué à son ancre — le cadre mentait sur le montage. Le mouvement est repris
- * en écart (*delta*), pas en valeur absolue : l'ancre garde sa propre échelle,
- * et les deux restent conformes à ce que le moteur calcule au rendu.
+ * L'aperçu calcule l'ancre de la légende depuis le centre du cadre couvrant —
+ * la fonction `ancreLegende`, celle-là même des trois pipelines : écrire dans
+ * `overrides.yAnchor` pendant qu'un bandeau est actif ne se voit donc nulle
+ * part, et réécrire `yAnchor` depuis le bandeau reviendrait à noter deux fois
+ * la même grandeur. Ce qui restait à recoller, c'est l'autre main du geste :
+ * tirer le curseur « Hauteur d'ancrage » bougeait le texte sans bouger le
+ * cadre, qui se met à mentir sur le rendu. On le ramène donc centré sur l'ancre
+ * demandée.
  *
- * Quand les deux bougent dans le même patch (un plan importé, un préréglage
- * appliqué), on ne force rien : c'est l'état choisi qui prime.
+ * Un geste qui change les deux à la fois (import d'un plan, application d'un
+ * préréglage) vient d'un seul choix : on ne force rien.
  */
-export const ZONE_SOUS_TITRES = "bottom";
-
 function coupleZoneEtAncre(avant: Project, apres: Project): Project {
   if (avant.masks === apres.masks && avant.overrides === apres.overrides) return apres;
 
-  const bandeAvant = avant.masks.find((m) => m.id === ZONE_SOUS_TITRES);
-  const bandeApres = apres.masks.find((m) => m.id === ZONE_SOUS_TITRES);
+  const bandeAvant = cadreCouvrant(avant.masks);
+  const bandeApres = cadreCouvrant(apres.masks);
+  if (!bandeAvant || !bandeApres) return apres;
+
   const ancreAvant = projectPreset(avant).yAnchor;
   const ancreApres = projectPreset(apres).yAnchor;
+  const bandeBouge = bandeApres.y !== bandeAvant.y || bandeApres.h !== bandeAvant.h;
+  if (ancreAvant === ancreApres || bandeBouge) return apres;
 
-  const bouge =
-    bandeAvant && bandeApres && bandeAvant.y !== bandeApres.y ? bandeApres.y - bandeAvant.y : null;
-  const ancreBougee = ancreAvant !== ancreApres;
-
-  if (bouge !== null && !ancreBougee) {
-    const y = round3(clamp(ancreApres + bouge, 0, 0.98));
-    if (y === ancreApres) return apres;
-    return { ...apres, overrides: { ...apres.overrides, yAnchor: y } };
-  }
-
-  if (ancreBougee && bouge === null && bandeApres) {
-    const suit = clampZone({ ...bandeApres, y: bandeApres.y + (ancreApres - ancreAvant) });
-    if (suit.y === bandeApres.y) return apres;
-    return { ...apres, masks: apres.masks.map((m) => (m.id === ZONE_SOUS_TITRES ? suit : m)) };
-  }
-
-  return apres;
+  // Centré sur l'ancre, dans les mêmes bornes que le moteur : 0,06…0,94.
+  const cible = Math.min(0.94, Math.max(0.06, ancreApres)) - bandeApres.h / 2;
+  const suit = clampZone({ ...bandeApres, y: round3(cible) });
+  if (suit.y === bandeApres.y) return apres;
+  return {
+    ...apres,
+    masks: apres.masks.map((m) => (m.id === bandeApres.id ? suit : m)),
+  };
 }
-
 function withClips(state: EditorState, clips: Clip[], mergeKey?: string): EditorState {
   return push(state, { ...state.hist.present, clips }, mergeKey);
 }

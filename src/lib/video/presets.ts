@@ -170,6 +170,30 @@ export type MaskZone = {
   enabled: boolean;
 };
 
+/**
+ * Le cadre qui sert de plaque au sous-titre : le premier bandeau activé, du bas
+ * ou du haut — jamais les deux. Les trois pipelines et la scène partagent cette
+ * règle ; c'est elle qui décide de ce que « déplacer le cadre » veut dire à
+ * l'écran. Le `find` lit l'ordre des zones : un projet qui activerait les deux
+ * bandeaux voit celui du bas gagner, parce que DEFAULT_MASKS le pose en premier.
+ */
+export function cadreCouvrant(masks: readonly MaskZone[]): MaskZone | undefined {
+  return masks.find((m) => m.enabled && (m.id === "bottom" || m.id === "top"));
+}
+
+/**
+ * Ordonnée d'ancrage de la légende, en fraction de hauteur d'image.
+ *
+ * Un cadre couvrant actif impose son propre centre : la plaque et le texte qui
+ * s'y appuie ne se quittent jamais. Sans lui, c'est le réglage du style qui
+ * reprend la main. Le bornage 0,06…0,94 est celui du `drawtext` : en dehors, la
+ * ligne serait à moitié hors image.
+ */
+export function ancreLegende(masks: readonly MaskZone[], fallback: number): number {
+  const couvert = cadreCouvrant(masks);
+  return couvert ? Math.min(0.94, Math.max(0.06, couvert.y + couvert.h / 2)) : fallback;
+}
+
 export const DEFAULT_MASKS: MaskZone[] = [
   { id: "bottom", label: "Sous-titres FR (bas)", x: 0, y: 0.82, w: 1, h: 0.14, enabled: false },
   { id: "top", label: "Bandeau haut", x: 0, y: 0, w: 1, h: 0.08, enabled: false },
