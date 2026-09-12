@@ -136,6 +136,15 @@ conversation doit survivre à un redéploiement, travaillez en mode sans état
 (`params.document` / `result.document`) : c'est le document qui porte l'état,
 pas l'instance.
 
+**Comment le document voyage.** `params.document` est la voie documentée ; un agent
+qui ne lit que les schémas d'outils glisse `document` dans `arguments`, avec les
+autres entrées — le fil le remonte à sa place plutôt que de répondre 400. Dans les
+deux cas `arguments` reste strict : une clé inconnue d'un outil est refusée par
+nom, jamais ignorée. Côté en-têtes, la règle est celle de la spécification :
+`Accept: application/json, text/event-stream` est répondu en JSON (c'est le
+serveur qui choisit) ; seul un client qui n'accepterait _que_ le flux reçoit le
+405, et un `GET` qui réclame un flux pareillement.
+
 `GET /api/mcp` répond la santé du fil (nom, version, nombre d'outils, sessions
 ouvertes, `disque: false`) — c'est ce qu'on regarde après un déploiement, sans
 jeton. En local, `npm run mcp:http` ouvre le même fil sur le port 4750.

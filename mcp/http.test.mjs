@@ -140,6 +140,39 @@ describe("la porte", () => {
     expect(reponse.headers.get("mcp-session-id")).toMatch(/^[0-9a-f-]{8,}/);
   });
 
+  it("un document glissé dans arguments ouvre le mode sans état", async () => {
+    // `params.document` est la voie documentee ; mais un agent qui ne lit que
+    // les schemas d'outils met `document` dans `arguments`, avec les autres
+    // entrees. Ce doit etre la meme porte, pas un 400.
+    const transport = CREER_TRANSPORT({ secret: "s3cret" });
+    const reponse = await transport.fetch(
+      new Request("http://localhost/api/mcp", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          accept: "application/json",
+          authorization: "Bearer s3cret",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 7,
+          method: "tools/call",
+          params: {
+            name: "etat",
+            arguments: {
+              document: { app: "viraldub", version: 2, timeline: { clips: [], cuts: [] } },
+            },
+          },
+        }),
+      }),
+    );
+    expect(reponse.status).toBe(200);
+    const corps = await reponse.json();
+    expect(corps.result.isError).toBeFalsy();
+    expect(corps.result.document).toBeDefined();
+    expect(corps.result.document.timeline).toBeDefined();
+  });
+
   it("un POST qui ne sait lire que le flux recoit le refus nomme", async () => {
     const transport = CREER_TRANSPORT({ secret: "s3cret" });
     const reponse = await transport.fetch(

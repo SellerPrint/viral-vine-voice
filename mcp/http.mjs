@@ -267,6 +267,18 @@ export function CREER_TRANSPORT({
       }
 
       const messages = Array.isArray(lu.message) ? lu.message : [lu.message];
+      // Un agent qui lit `tools/list` ne voit pas `document` dans le schema des
+      // outils : il le glisse donc dans `arguments`, comme tout le reste. Plutot
+      // qu'un 400 sur un appel par ailleurs correct, on remonte la cle a sa
+      // place. `arguments` redevient strict ensuite : c'est la garde
+      // `entreesPropres` qui veut ca, et elle ne doit pas buter sur le document.
+      for (const message of messages) {
+        const params = message?.params;
+        if (params && params.document === undefined && params.arguments?.document !== undefined) {
+          params.document = params.arguments.document;
+          delete params.arguments.document;
+        }
+      }
       const estInit = messages.some((m) => m?.method === "initialize");
       // Deux facons d'appeler sans identifiant : ouvrir une session, ou porter
       // son document. La seconde est celle qui traverse un red deploiement : il
