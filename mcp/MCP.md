@@ -10,6 +10,14 @@ Ce que le modèle **ne fait pas** par ce canal : rendre une vidéo, toucher le p
 lui-même, lire une clé API. Il produit un plan de montage en nombres et en texte.
 L'export se déclenche dans l'atelier, sur le fichier de l'utilisateur.
 
+L'atelier n'est pas muet là-dessus : l'onglet **Projet** a un volet « Agent de
+montage (MCP) » qui lit `/api/mcp` (nom, version, nombre d'outils, accès,
+sessions), permet de tester le fil avec un jeton qui ne quitte pas la page, et
+applique à la table le montage que le fil a composé — par `appliquerConfiguration`,
+la porte du bouton Importer, donc avec `parseConfig` et le bornage à la durée du
+plan. C'est aussi de là que l'on copie le bloc de branchement, déjà rempli de
+l'URL du déploiement ouvert.
+
 ## Brancher le client
 
 Le serveur se lance avec Node, depuis la racine du dépôt (les chemins d'écriture

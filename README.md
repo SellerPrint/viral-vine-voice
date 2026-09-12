@@ -26,6 +26,8 @@ Tout le traitement vidéo tourne **dans ton navigateur** via `ffmpeg.wasm`. Ton 
 - 🪞 **Effet miroir** — pour contourner la détection de doublons des plateformes
 - 🎬 **Monteur type logiciel desktop** — timeline multi-pistes (plan, coupes, sous-titres, voix off), vignettes décodées du plan, règle graduée, aimantation, zoom molette, raccourcis `Espace` `J/K/L` `S` `Suppr` `Ctrl+Z`, la hauteur de la timeline se tire au bord de son cadre (double-clic : retour à l'automatique), et `F` replie les volets quand le plan manque de place
 - 🖱️ **Manipulation directe** — un sous-titre se déplace à la souris, un flou se redimensionne dans l'aperçu, un style se glisse depuis la bibliothèque sur la piste
+- 🤖 **Agent de montage (MCP)** — 17 outils sur stdio (`npm run mcp`) ou sur HTTP (`POST /api/mcp`, verrouillé par `MCP_TOKEN`) ; dans l'atelier, l'onglet Projet a un volet « Agent de montage » qui lit l'état réel du fil, le teste, et pose sur la table le montage que l'agent a composé — par la même porte que le bouton Importer
+
 - 🔁 **Deux chemins d'export** — rendu local (aucun appel réseau, ré-encode la timeline telle quelle) ou doublage complet ; les pistes générées par l'IA reviennent ensuite dans le monteur, corrigeables
 
 ---

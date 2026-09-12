@@ -8,20 +8,15 @@ import { isSameLanguage, SOURCE_LANGUAGES } from "@/lib/languages";
 import { describe } from "@/lib/errors";
 import { formatClock } from "@/lib/editor/edl";
 import { renderPreviewFrame } from "@/lib/video/preview";
-import { clampZone, makeClip, resolvePresetById } from "@/lib/editor/project";
+import { appliquerConfiguration, configurationDuProjet } from "@/lib/editor/appliquer-config";
+import { clampZone, resolvePresetById } from "@/lib/editor/project";
 import { scanSilences } from "@/lib/editor/silences";
-import {
-  applyConfig,
-  bornerTimeline,
-  configFileName,
-  exportConfig,
-  MAX_CONFIG_BYTES,
-  parseConfig,
-} from "@/lib/config-io";
+import { configFileName, MAX_CONFIG_BYTES } from "@/lib/config-io";
 import type { PanelTab } from "@/lib/editor/store";
 import type { Clip } from "@/lib/editor/types";
 import { isSelected, onlySelection } from "@/lib/editor/store";
 
+import { AgentMcp } from "./AgentMcp";
 import { Chips, Icon, IconButton, Kv, Notice, Section, Slider, Switch } from "./ui";
 import { useEditor, useEditorActions } from "./editor-context";
 
@@ -1113,54 +1108,7 @@ function ProjectTab() {
   const configInputRef = useRef<HTMLInputElement | null>(null);
 
   const exportConfigFile = () => {
-    const json = exportConfig({
-      presetId: project.presetId,
-      sourceLanguage: project.sourceLanguage.code,
-      targetLanguage: project.targetLanguage.code,
-      options: {
-        wordByWord: project.wordByWord,
-        removeOriginalAudio: project.removeOriginalAudio,
-        cutSilences: project.cutSilences,
-        mirror: project.mirror,
-        ttsProvider: project.ttsProvider,
-        clonedVoiceId: project.clonedVoiceId,
-        filterId: project.filterId,
-        upscale: project.upscale,
-        transition: project.transition,
-        transitionDuration: project.transitionDuration,
-        subtitleOpacity: project.boxOpacity,
-        ambienceLevel: project.ambienceLevel,
-        maskStrength: project.maskStrength,
-      },
-      masks: project.masks,
-      // Le corps et l'ancrage réglés à la souris voyagent avec le reste : un
-      // fichier qui ne dirait que « preset karaoké » perdrait la typographie.
-      overrides: project.overrides,
-      // Le montage voyage avec les réglages : sans les blocs, un agent ne recevait
-      // qu'une fiche de style, et devait tout recomposer à la main.
-      timeline: {
-        // flatMap plutot que filter+map : c'est le test sur `track` qui doit
-        // restreindre le type, sinon « cuts » se glisse dans les blocs exportés.
-        clips: project.clips.flatMap((clip) =>
-          clip.track === "cuts"
-            ? []
-            : [
-                {
-                  track: clip.track,
-                  start: clip.start,
-                  duration: clip.duration,
-                  label: clip.label,
-                  ...(clip.text ? { text: clip.text } : {}),
-                  ...(clip.sourceText ? { sourceText: clip.sourceText } : {}),
-                  ...(clip.speakerId ? { speakerId: clip.speakerId } : {}),
-                },
-              ],
-        ),
-        cuts: project.clips
-          .filter((clip) => clip.track === "cuts")
-          .map((clip) => ({ start: clip.start, duration: clip.duration })),
-      },
-    });
+    const json = configurationDuProjet(project);
     const url = URL.createObjectURL(new Blob([json], { type: "application/json" }));
     const link = document.createElement("a");
     link.href = url;
@@ -1179,110 +1127,10 @@ function ProjectTab() {
       actions.notify({ kind: "error", text: "Fichier de configuration trop volumineux." });
       return;
     }
-    const result = parseConfig(await file.text());
-    if (!result.ok) {
-      actions.notify({ kind: "error", text: result.error });
-      return;
-    }
-    const merged = applyConfig(result.config, {
-      presetId: project.presetId,
-      sourceLanguage: project.sourceLanguage.code,
-      targetLanguage: project.targetLanguage.code,
-      options: {
-        wordByWord: project.wordByWord,
-        removeOriginalAudio: project.removeOriginalAudio,
-        cutSilences: project.cutSilences,
-        mirror: project.mirror,
-        ttsProvider: project.ttsProvider,
-        clonedVoiceId: project.clonedVoiceId,
-        filterId: project.filterId,
-        upscale: project.upscale,
-        transition: project.transition,
-        transitionDuration: project.transitionDuration,
-        subtitleOpacity: project.boxOpacity,
-        ambienceLevel: project.ambienceLevel,
-        maskStrength: project.maskStrength,
-      },
-      masks: project.masks,
-      overrides: project.overrides,
-    });
-    actions.patch({
-      presetId: merged.presetId,
-      // Le fichier porte le style complet ou rien : on ne melange pas un import
-      // avec la reglure precedente, sinon deux imports successifs s'empilent.
-      overrides: merged.overrides ?? {},
-      sourceLanguage:
-        SOURCE_LANGUAGES.find((item) => item.code === merged.sourceLanguage) ??
-        project.sourceLanguage,
-      targetLanguage:
-        TARGET_LANGUAGES.find((item) => item.code === merged.targetLanguage) ??
-        project.targetLanguage,
-      wordByWord: merged.options.wordByWord,
-      removeOriginalAudio: merged.options.removeOriginalAudio,
-      cutSilences: merged.options.cutSilences,
-      mirror: merged.options.mirror,
-      ttsProvider: merged.options.ttsProvider,
-      clonedVoiceId: merged.options.clonedVoiceId,
-      filterId: merged.options.filterId,
-      upscale: merged.options.upscale,
-      transition: merged.options.transition,
-      transitionDuration: merged.options.transitionDuration,
-      boxOpacity: merged.options.subtitleOpacity,
-      ambienceLevel: merged.options.ambienceLevel,
-      maskStrength: merged.options.maskStrength,
-      masks: project.masks.map((zone) => {
-        const imported = merged.masks.find((item) => item.id === zone.id);
-        return imported ? { ...zone, ...imported } : zone;
-      }),
-    });
-
-    // La timeline, elle, remplace les pistes de travail : on ne peut pas
-    // « fusionner » deux montages, on choisit l'un ou l'autre. Le plan lui-même
-    // reste en place — sinon l'import d'un montage démonte la vidéo qu'il cadre.
-    if (merged.timeline) {
-      const borne = bornerTimeline(merged.timeline, project.source?.duration ?? 0);
-      const surcharges = (clip: {
-        text?: string;
-        sourceText?: string;
-        label?: string;
-        speakerId?: string;
-      }) => {
-        const extra: Partial<Clip> = {};
-        if (clip.label) extra.label = clip.label;
-        if (clip.text) extra.text = clip.text;
-        if (clip.sourceText) extra.sourceText = clip.sourceText;
-        if (clip.speakerId) extra.speakerId = clip.speakerId;
-        return extra;
-      };
-      const blocs = [
-        ...project.clips.filter((clip) => clip.track === "video"),
-        ...borne.clips.map((clip) =>
-          makeClip(
-            clip.track,
-            { start: clip.start, end: clip.start + clip.duration },
-            surcharges(clip),
-          ),
-        ),
-        ...borne.cuts.map((coupe) =>
-          makeClip(
-            "cuts",
-            { start: coupe.start, end: coupe.start + coupe.duration },
-            { reason: "manuel" },
-          ),
-        ),
-      ];
-      actions.patch({ clips: blocs });
-      actions.notify({
-        kind: borne.rejets > 0 ? "warn" : "ok",
-        text:
-          borne.rejets > 0
-            ? `Montage importé : ${borne.clips.length} bloc(s), ${borne.cuts.length} coupe(s) — ${borne.rejets} segment(s) hors durée écartés.`
-            : `Montage importé : ${borne.clips.length} bloc(s), ${borne.cuts.length} coupe(s).`,
-      });
-      return;
-    }
-
-    actions.notify({ kind: "ok", text: "Configuration importée." });
+    // Lecture ici, application partagée : `appliquerConfiguration` est aussi la
+    // porte par laquelle entre le document rendu par le fil MCP. Une seule
+    // fusion, donc un seul endroit où se glisserait un bug.
+    appliquerConfiguration(await file.text(), project, actions, "fichier");
   };
 
   return (
@@ -1367,6 +1215,8 @@ function ProjectTab() {
           voix clonée, ni vidéo.
         </p>
       </Section>
+
+      <AgentMcp />
 
       <Section title="Raccourcis" collapsible defaultOpen={false}>
         <div className="ed-card">
