@@ -537,6 +537,22 @@ describe("bandeau des sous-titres et ancre de la légende", () => {
     expect(projectPreset(p(next)).yAnchor).toBe(0.2);
   });
 
+  it("glisser la légende dans la scène déplace le bandeau sans l'écraser", () => {
+    // Le geste sur le cadran de la légende écrit `overrides.yAnchor`. Le bandeau
+    // doit le suivre — mais pas y laisser sa hauteur : mesuré en direct dans le
+    // navigateur, il passait de 14,5 % à 3 %, le plancher toléré, et la plaque de
+    // recouvrement devenait un trait.
+    const base = state({ project: { masks: [bande(0.75, 0.145)], overrides: {} } });
+    const apres = run(base, {
+      type: "patch",
+      patch: { overrides: { yAnchor: 0.638 } },
+      mergeKey: "legende",
+    });
+    expect(p(apres).masks[0]).toMatchObject({ y: 0.566, h: 0.145, w: 1, x: 0 });
+    // et l'ancre que le moteur retiendra est bien celle demandee, pas le plancher
+    expect(ancreLegende(p(apres).masks, 0.638)).toBeCloseTo(0.6385, 4);
+  });
+
   it("sans cadre couvrant actif, le curseur d'ancre ne déplace rien", () => {
     const start = state({
       project: { masks: [{ ...bande(0.82), enabled: false }, bande(0.1, 0.1, "other")] },

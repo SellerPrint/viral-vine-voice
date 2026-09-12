@@ -670,9 +670,20 @@ input[type="range"].ed-slider::-moz-range-thumb {
   inset: 0;
   pointer-events: none;
 }
+/* Le texte incrusté se saisit à la main, comme une couche : il réactive les
+   événements que son calque de découpe avait coupés pour ne pas gêner les
+   zones de masquage. Les poignées de ces zones, peintes plus tard dans le même
+   parent, restent au-dessus : rien ne leur est volé. */
 .ed-subtitle {
   position: absolute;
   left: 50%;
+  /* Au-dessus des cadres de masquage : quand on attrape le texte, c'est le
+     texte que l'on saisit. Les poignées du bandeau restent atteignables parce
+     que seule la ligne de texte répond (`.ed-subtitle-text`), pas la largeur du
+     bloc — mesuré : le cadran bleu couvrait la ligne et volait le geste, la
+     hauteur du bandeau partait à 3 % pendant que la légende sautait. */
+  z-index: 2;
+  pointer-events: none;
   transform: translateX(-50%);
   text-align: center;
   font-family: var(--font-display);
@@ -683,6 +694,70 @@ input[type="range"].ed-slider::-moz-range-thumb {
   width: 92%;
   /* Le rendu FFmpeg centre le bloc, puis le cale à `yAnchor` du cadre. */
 }
+/* Poignée de corps : un seul carré, une seule direction comprise (verticale),
+   dessinée sur le bloc pour qu'on la trouve sans chercher le curseur. */
+.ed-subtitle-text {
+  /* L'empreinte du geste : la ligne, ses deux lignes, pas la largeur du cadre. */
+  display: inline-block;
+  pointer-events: auto;
+  touch-action: none;
+  cursor: move;
+  padding: 0 0.18em;
+  border-radius: 3px;
+}
+
+.ed-subtitle-text:hover {
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--ed-select) 55%, transparent);
+}
+
+.ed-subtitle-grip {
+  position: absolute;
+  right: -7px;
+  bottom: -7px;
+  /* La poignée vit dans un calque laissé transparent pour ne pas voler le
+     cadre de masquage : elle doit donc redemander la main pour elle seule,
+     sinon le geste d'angle ne part nulle part et le corps ne bouge pas. */
+  pointer-events: auto;
+  width: 14px;
+  height: 14px;
+  border: 1.5px solid var(--ed-select);
+  border-radius: 3px;
+  background: #fff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.55);
+  cursor: ns-resize;
+  opacity: 0.7;
+}
+.ed-subtitle:hover .ed-subtitle-grip,
+.ed-subtitle[data-geste] .ed-subtitle-grip,
+.ed-subtitle-grip:hover {
+  opacity: 1;
+}
+/* Aperçu HyperFrames : un 9:16 verrouillé, sandboxé, qui ne pretend rien de
+   plus qu'une lecture de l'animation. */
+.ed-hf-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: calc(8px * var(--ed-ui));
+}
+.ed-hf-preset {
+  display: flex;
+  flex-direction: column;
+  gap: calc(4px * var(--ed-ui));
+  font-size: var(--ed-fs-note);
+  color: var(--ed-text-faint);
+  flex: 1 1 190px;
+}
+.ed-hyperframes {
+  display: block;
+  width: 100%;
+  aspect-ratio: 9 / 16;
+  max-height: 40vh;
+  margin-top: calc(8px * var(--ed-ui));
+  border: 1px solid var(--ed-line);
+  border-radius: calc(8px * var(--ed-ui));
+  background: #000;
+}
 .ed-subtitle-clip {
   position: absolute;
   inset: 0;
@@ -691,6 +766,10 @@ input[type="range"].ed-slider::-moz-range-thumb {
 }
 .ed-mask {
   position: absolute;
+  /* Pas de `z-index` ici : la légende doit passer au-dessus du *corps* du
+     cadre, mais ses poignées au-dessus d'elle. Un contexte d'empilement sur le
+     parent emprisonnerait les poignées sous le texte, et le bord sud — qui
+     traverse la ligne — ne se saisirait plus. */
   border: 1.5px solid var(--ed-select);
   background: rgba(79, 141, 255, 0.14);
   border-radius: 2px;
@@ -721,6 +800,8 @@ input[type="range"].ed-slider::-moz-range-thumb {
 }
 .ed-mask-handle {
   position: absolute;
+  /* Au-dessus de la légende : la poignée est visée au pixel, elle gagne. */
+  z-index: 3;
   width: 9px;
   height: 9px;
   margin: -4.5px 0 0 -4.5px;

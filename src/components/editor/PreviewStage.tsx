@@ -70,6 +70,13 @@ export function PreviewStage() {
   const actions = useEditorActions();
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const overlayRef = useRef<HTMLDivElement | null>(null);
+  /**
+   * Le calque qui porte la légende : c'est sa hauteur que `top: x%` adresse.
+   * Le geste de la légende doit donc se mesurer sur cette boîte, et non sur
+   * l'`overlay` des zones — les deux ne coïncident pas toujours, et l'écart se
+   * voyait : 70 px à la souris déplaçaient la ligne de 150 px.
+   */
+  const legendeBoiteRef = useRef<HTMLDivElement | null>(null);
   const [boxSize, setBoxSize] = useState({ width: 0, height: 0 });
   const [drag, setDrag] = useState<DragState>(null);
   const [showGuides, setShowGuides] = useState(false);
@@ -159,6 +166,104 @@ export function PreviewStage() {
   /* --------------------------- glisser des masques -------------------------- */
   const gesteVue = useRef(false);
   const cadreDeplace = useRef(false);
+  const legendeRepond = useRef(false);
+  const legendeLaterale = useRef(false);
+
+  /* ------------------------- la légende, à la main ------------------------- */
+  // Le texte incrusté est une couche comme une autre : le tenir le déplace,
+  // tenir sa poignée change son corps. Le cadran bleu reste la zone de
+  // masquage ; les deux se suivent parce que le réducteur recadre la bande sur
+  // l'ancre, donc aucune des deux mains ne décroche l'autre.
+  const [geste, setGeste] = useState<{
+    mode: "place" | "corps";
+    x: number;
+    y: number;
+    ancre: number;
+    corps: number;
+    pas: number;
+  } | null>(null);
+
+  const debuterLegende = useCallback(
+    (event: React.PointerEvent, mode: "place" | "corps") => {
+      const element = legendeBoiteRef.current ?? overlayRef.current;
+      if (!element) return;
+      event.stopPropagation();
+      event.preventDefault();
+      (event.target as Element).setPointerCapture?.(event.pointerId);
+      legendeRepond.current = false;
+      legendeLaterale.current = false;
+      setGeste({
+        mode,
+        x: event.clientX,
+        y: event.clientY,
+        // On part d'ou la ligne se voit, pas du reglage du style : avec un
+        // bandeau actif, l'ancre affichee est le centre du cadre, et demarrer
+        // sur `preset.yAnchor` faisait sauter la legende de 8 % de l'image au
+        // premier pixel bouge.
+        ancre: ancreLegende(project.masks, preset.yAnchor),
+        corps: preset.fontsize,
+        // Le denominateur du geste : la boite que `top: %` adresse, pas une
+        // autre. `clientHeight` plutot que `scale` : l'ancre est une fraction de
+        // la hauteur, le corps une fraction de la largeur.
+        pas: element.clientHeight || 1,
+      });
+    },
+    [preset.yAnchor, preset.fontsize, project.masks],
+  );
+
+  useEffect(() => {
+    if (!geste) return;
+    const onMove = (event: PointerEvent) => {
+      const dx = event.clientX - geste.x;
+      const dy = event.clientY - geste.y;
+      if (Math.abs(dx) + Math.abs(dy) < 3) return;
+      legendeLaterale.current = Math.abs(dx) > Math.abs(dy);
+
+      if (geste.mode === "place") {
+        // À la verticale seulement : `drawtext` centre la ligne
+        // (`x=(w-text_w)/2`) et le contrat d'options n'a aucune ancre
+        // horizontale — la promettre à la souris mentirait sur l'export.
+        const cible =
+          Math.round(Math.min(0.98, Math.max(0, geste.ancre + dy / geste.pas)) * 1000) / 1000;
+        // Moins d'un pixel d'ecart : rien a ecrire. Sans ce seuil, l'arret a
+        // trois decimales suffisait a declencher un patch invisible, et le
+        // geste purement horizontal ne se signalait plus - la legende semblait
+        // morte alors qu'elle etait seulement deja a sa place.
+        if (Math.abs(cible - geste.ancre) * geste.pas < 1) return;
+        legendeRepond.current = true;
+        actions.patch({ overrides: { ...project.overrides, yAnchor: cible } }, "legende");
+        return;
+      }
+
+      // Le corps se lit en pixels de la *source* : la scène affiche
+      // `fontsize × (largeur du cadre / largeur de la source)`, donc un pixel
+      // parcouru à l'écran vaut `1 / cette proportion` dans l'option. Les bornes
+      // sont celles du curseur de l'inspecteur, même réglage, même plage.
+      const proportion = scale > 0.05 ? scale : 1;
+      const cible = Math.round(Math.min(170, Math.max(20, geste.corps - dy / proportion)));
+      if (cible === geste.corps) return;
+      legendeRepond.current = true;
+      actions.patch({ overrides: { ...project.overrides, fontsize: cible } }, "legende");
+    };
+    const onUp = () => {
+      // Un glissement à plat ne obtenait rien et ressemblait à une couche morte.
+      if (!legendeRepond.current && legendeLaterale.current) {
+        actions.notify({
+          kind: "info",
+          text: "La légende se règle à la verticale : le moteur centre chaque ligne, il n'existe pas d'ancre de gauche à droite.",
+        });
+      }
+      legendeRepond.current = false;
+      setGeste(null);
+      actions.endGesture();
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp, { once: true });
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+  }, [geste, actions, project.overrides, scale]);
 
   const beginDrag = useCallback(
     (event: React.PointerEvent, zone: MaskZone, mode: NonNullable<DragState>["mode"]) => {
@@ -395,13 +500,29 @@ export function PreviewStage() {
                   plan. Le cadre ne rogne plus lui-même — depuis que les
                   poignées des zones doivent déborder — donc le calque de texte
                   porte son propre `overflow: hidden`. */}
-              <div className="ed-subtitle-clip">
+              <div className="ed-subtitle-clip" ref={legendeBoiteRef}>
                 {ui.showSubs && !ui.compare && derived.visibleCue ? (
                   <div
                     className="ed-subtitle"
                     style={subtitleStyle(preset.fontsize || SUBTITLE_FONT)}
+                    data-geste={geste?.mode}
                   >
-                    {derived.visibleCue.text}
+                    {/* Le geste pend sur la ligne, pas sur le bloc : la largeur
+                        du cadran recouvrait les poignées du bandeau et leur
+                        volait le geste — tirer le texte écrasait sa hauteur. */}
+                    <span
+                      className="ed-subtitle-text"
+                      onPointerDown={(event) => debuterLegende(event, "place")}
+                      title="Légende — glisse la ligne pour la monter ou la descendre, la poignée blanche pour changer son corps"
+                    >
+                      {derived.visibleCue.text}
+                    </span>
+                    <span
+                      className="ed-subtitle-grip"
+                      data-geste="corps"
+                      onPointerDown={(event) => debuterLegende(event, "corps")}
+                      title={`Corps : ${preset.fontsize} px — glisse vers le haut pour agrandir`}
+                    />
                   </div>
                 ) : null}
               </div>
