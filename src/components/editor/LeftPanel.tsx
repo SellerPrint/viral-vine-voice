@@ -8,10 +8,11 @@ import { isSameLanguage, SOURCE_LANGUAGES } from "@/lib/languages";
 import { describe } from "@/lib/errors";
 import { formatClock } from "@/lib/editor/edl";
 import { renderPreviewFrame } from "@/lib/video/preview";
-import { clampZone, resolvePresetById } from "@/lib/editor/project";
+import { clampZone, makeClip, resolvePresetById } from "@/lib/editor/project";
 import { scanSilences } from "@/lib/editor/silences";
 import {
   applyConfig,
+  bornerTimeline,
   configFileName,
   exportConfig,
   MAX_CONFIG_BYTES,
@@ -1132,6 +1133,33 @@ function ProjectTab() {
         maskStrength: project.maskStrength,
       },
       masks: project.masks,
+      // Le corps et l'ancrage réglés à la souris voyagent avec le reste : un
+      // fichier qui ne dirait que « preset karaoké » perdrait la typographie.
+      overrides: project.overrides,
+      // Le montage voyage avec les réglages : sans les blocs, un agent ne recevait
+      // qu'une fiche de style, et devait tout recomposer à la main.
+      timeline: {
+        // flatMap plutot que filter+map : c'est le test sur `track` qui doit
+        // restreindre le type, sinon « cuts » se glisse dans les blocs exportés.
+        clips: project.clips.flatMap((clip) =>
+          clip.track === "cuts"
+            ? []
+            : [
+                {
+                  track: clip.track,
+                  start: clip.start,
+                  duration: clip.duration,
+                  label: clip.label,
+                  ...(clip.text ? { text: clip.text } : {}),
+                  ...(clip.sourceText ? { sourceText: clip.sourceText } : {}),
+                  ...(clip.speakerId ? { speakerId: clip.speakerId } : {}),
+                },
+              ],
+        ),
+        cuts: project.clips
+          .filter((clip) => clip.track === "cuts")
+          .map((clip) => ({ start: clip.start, duration: clip.duration })),
+      },
     });
     const url = URL.createObjectURL(new Blob([json], { type: "application/json" }));
     const link = document.createElement("a");
@@ -1141,7 +1169,7 @@ function ProjectTab() {
     URL.revokeObjectURL(url);
     actions.notify({
       kind: "ok",
-      text: "Configuration exportée (réglages seuls, aucun identifiant).",
+      text: "Configuration exportée : réglages et montage, aucun identifiant.",
     });
   };
 
@@ -1176,10 +1204,13 @@ function ProjectTab() {
         maskStrength: project.maskStrength,
       },
       masks: project.masks,
+      overrides: project.overrides,
     });
     actions.patch({
       presetId: merged.presetId,
-      overrides: {},
+      // Le fichier porte le style complet ou rien : on ne melange pas un import
+      // avec la reglure precedente, sinon deux imports successifs s'empilent.
+      overrides: merged.overrides ?? {},
       sourceLanguage:
         SOURCE_LANGUAGES.find((item) => item.code === merged.sourceLanguage) ??
         project.sourceLanguage,
@@ -1204,6 +1235,53 @@ function ProjectTab() {
         return imported ? { ...zone, ...imported } : zone;
       }),
     });
+
+    // La timeline, elle, remplace les pistes de travail : on ne peut pas
+    // « fusionner » deux montages, on choisit l'un ou l'autre. Le plan lui-même
+    // reste en place — sinon l'import d'un montage démonte la vidéo qu'il cadre.
+    if (merged.timeline) {
+      const borne = bornerTimeline(merged.timeline, project.source?.duration ?? 0);
+      const surcharges = (clip: {
+        text?: string;
+        sourceText?: string;
+        label?: string;
+        speakerId?: string;
+      }) => {
+        const extra: Partial<Clip> = {};
+        if (clip.label) extra.label = clip.label;
+        if (clip.text) extra.text = clip.text;
+        if (clip.sourceText) extra.sourceText = clip.sourceText;
+        if (clip.speakerId) extra.speakerId = clip.speakerId;
+        return extra;
+      };
+      const blocs = [
+        ...project.clips.filter((clip) => clip.track === "video"),
+        ...borne.clips.map((clip) =>
+          makeClip(
+            clip.track,
+            { start: clip.start, end: clip.start + clip.duration },
+            surcharges(clip),
+          ),
+        ),
+        ...borne.cuts.map((coupe) =>
+          makeClip(
+            "cuts",
+            { start: coupe.start, end: coupe.start + coupe.duration },
+            { reason: "manuel" },
+          ),
+        ),
+      ];
+      actions.patch({ clips: blocs });
+      actions.notify({
+        kind: borne.rejets > 0 ? "warn" : "ok",
+        text:
+          borne.rejets > 0
+            ? `Montage importé : ${borne.clips.length} bloc(s), ${borne.cuts.length} coupe(s) — ${borne.rejets} segment(s) hors durée écartés.`
+            : `Montage importé : ${borne.clips.length} bloc(s), ${borne.cuts.length} coupe(s).`,
+      });
+      return;
+    }
+
     actions.notify({ kind: "ok", text: "Configuration importée." });
   };
 
