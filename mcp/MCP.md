@@ -80,24 +80,45 @@ simplement sur une autre région, l'identifiant ne répond plus et le fil rend
 mode sans état traverse les redéploiements : c'est celui qu'on adopte quand on
 branche un agent sur une URL.
 
-Un client qui parle HTTP se branche par une URL, pas par une commande — dans
-`claude_desktop_config.json` (avec le connecteur) ou `.cursor/mcp.json` :
+Comment brancher un client sur cette URL — les trois chemins qui marchent
+aujourd'hui, selon le client (les capacités HTTP de Claude Desktop changent de
+version, vérifiez la vôtre avant d'accuser le serveur) :
 
-```json
+```jsonc
+// Cursor — .cursor/mcp.json : url et en-tetes sont admis directement
 {
   "mcpServers": {
     "viraldub-monteur": {
-      "type": "http",
       "url": "https://<domaine>/api/mcp",
-      "headers": { "Authorization": "Bearer <MCP_TOKEN>" }
-    }
-  }
+      "headers": { "Authorization": "Bearer <MCP_TOKEN>" },
+    },
+  },
 }
 ```
 
-Le fil stdio de `mcp/serveur.mjs` reste la voie recommandée sur un poste : il
-connaît le dossier du projet, il y écrit le fichier, et aucune session n'est à
-reprendre après un froid.
+- **Claude Desktop, en remote** : `Settings → Connectors → Add custom
+connector`, avec l'URL de l'atelier (`https://<domaine>/api/mcp`). Le jeton se
+  met dans le connector (en-tête `Authorization`), pas dans
+  `claude_desktop_config.json` — ce fichier ne valide que les entrées `command`,
+  et un `url` qu'on y glisse est silencieusement ignoré ou fait partir l'app en
+  erreur.
+- **N'importe quel client qui ne parle que stdio** (dont Claude Desktop en
+  local, et tout ce qui refuse le HTTP nu) : un pont fait l'affaire, et
+  `--transport http-only` evite le negocie SSE que ce fil ne sert pas :
+
+  ```bash
+  npx -y mcp-remote http://127.0.0.1:4750/ --transport http-only \
+    --header "Authorization: Bearer <MCP_TOKEN>"
+  ```
+
+**Ce que le fil HTTP ne fait pas** : il ne tient pas de flux `text/event-stream`
+— un `GET` avec `Accept: text/event-stream` reçoit un 405 qui le dit, plutôt
+qu'un JSON que le client lirait comme un flux vide. Une requête = une réponse,
+et c'est ce qui le rend fiable sur une fonction serverless, où un flux ouvert
+n'a aucune garantie de durer plus que l'appel. Pour la même raison, quand une
+conversation doit survivre à un redéploiement, travaillez en mode sans état
+(`params.document` / `result.document`) : c'est le document qui porte l'état,
+pas l'instance.
 
 `GET /api/mcp` répond la santé du fil (nom, version, nombre d'outils, sessions
 ouvertes, `disque: false`) — c'est ce qu'on regarde après un déploiement, sans

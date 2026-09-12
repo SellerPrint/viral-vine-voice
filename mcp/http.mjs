@@ -142,6 +142,23 @@ export function CREER_TRANSPORT({
         return new Response(null, { status: 204, headers: tetesCors });
       }
 
+      // Un client Streamable HTTP ouvre un `GET` pour recevoir un flux d'evenements.
+      // Ce fil n'en sert pas : mieux vaut le dire en 405 qu'un JSON avale comme un
+      // flux vide, ce qui se traduit cote client par un silence inexpliquable.
+      const accepte = request.headers.get("accept") ?? "";
+      if (accepte.includes("text/event-stream")) {
+        return json(
+          405,
+          {
+            refus:
+              "flux SSE non servi par ce fil : il repond en JSON a chaque appel (mode POST-a-POST). " +
+              "Cote client, un pont stdio fait l'affaire — `npx mcp-remote <url> --transport http-only` — " +
+              "et le mode sans etat (`params.document`) evite d'avoir a maintenir un flux.",
+          },
+          { allow: "POST", ...tetesCors },
+        );
+      }
+
       if (method === "GET" || method === "HEAD") {
         purger();
         return json(

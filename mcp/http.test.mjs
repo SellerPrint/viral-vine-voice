@@ -80,6 +80,21 @@ describe("la porte", () => {
     expect((await reponse.json()).error.code).toBe(-32700);
   });
 
+  it("dit qu'il ne sert pas de flux SSE, plutot que de se taire", async () => {
+    // Un client Streamable HTTP ouvre un GET pour un flux d'evenements. Un JSON
+    // lu comme un flux vide se traduit par un client branche et muet : le refus
+    // nomme, lui, se comprend.
+    const transport = unTransport();
+    const reponse = await transport.fetch(
+      new Request("http://localhost/api/mcp", { headers: { accept: "text/event-stream" } }),
+    );
+    expect(reponse.status).toBe(405);
+    expect((await reponse.json()).refus).toMatch(/mcp-remote|sans état/);
+    // la sante du fil reste accessible a un client qui ne demande que du JSON
+    const sansFlux = await transport.fetch(new Request("http://localhost/api/mcp"));
+    expect(sansFlux.status).toBe(200);
+  });
+
   it("n'accepte que GET, POST, OPTIONS", async () => {
     const transport = unTransport();
     const reponse = await transport.fetch(
