@@ -92,11 +92,15 @@ export function AgentMcp() {
   const [outils, setOutils] = useState<string[]>([]);
   const [enCours, setEnCours] = useState<string | null>(null);
   const [erreur, setErreur] = useState<string | null>(null);
+  // Le premier GET n'est pas encore rentre que le volet doit dire « je lis »,
+  // pas « aucune reponse » : sur un deploiement froid, la difference se voit.
+  const [sondage, setSondage] = useState(true);
   const controle = useRef<AbortController | null>(null);
 
   /** Ce que le fil dit de lui, et s'il s'ouvre. Le test est en lecture seule. */
   const regarder = useCallback(async (signaux?: AbortSignal) => {
     setErreur(null);
+    setSondage(true);
     try {
       const etat = await fetch(FIL, { signal: signaux });
       if (etat.ok) setSante((await etat.json()) as Sante);
@@ -121,6 +125,8 @@ export function AgentMcp() {
         setErreur(`Fil injoignable : ${(cause as Error).message}`);
         setOuverture("inconnue");
       }
+    } finally {
+      setSondage(false);
     }
   }, []);
 
@@ -255,7 +261,9 @@ export function AgentMcp() {
           v={
             sante
               ? `${sante.serveur ?? "viraldub-monteur"} ${sante.version ?? ""} · ${sante.outils ?? "?"} outils`
-              : "aucune réponse sur /api/mcp"
+              : sondage
+                ? "lecture de /api/mcp…"
+                : "aucune réponse sur /api/mcp"
           }
         />
         <Kv
@@ -267,7 +275,9 @@ export function AgentMcp() {
                 ? "jeton exigé"
                 : ouverture === "ouverte"
                   ? "ouvert sans jeton (à corriger)"
-                  : "à vérifier"
+                  : sondage
+                    ? "en cours…"
+                    : "à vérifier"
           }
         />
         <Kv
