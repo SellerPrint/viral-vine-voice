@@ -7,6 +7,7 @@ import {
 } from "../transitions";
 import type { Cue } from "../subtitles/cues";
 import type { MaskZone, SubtitlePreset } from "../presets";
+import { boiteDeTexte, opacitePlaque } from "../presets";
 
 export type Rect = { x: number; y: number; w: number; h: number };
 
@@ -142,12 +143,13 @@ export function withOpacity(color: string, opacity: number): string {
 export function buildStyleBits(preset: SubtitlePreset): string {
   // L'opacite du preset (ou de la surcharge utilisateur) est respectee.
   // Auparavant elle etait ecrasee par `@0.95`, rendant tout style discret
-  // impossible : le fond restait un bandeau quasi opaque.
-  const opacity = preset.boxOpacity ?? 0.95;
-  const boxColor = withOpacity(preset.boxColor, opacity);
-  const boxBorderW = Math.max(preset.boxBorderW, 16);
-  // Un fond totalement transparent n'a pas de sens : on desactive la boite.
-  const useBox = preset.useBox !== false && opacity > 0.01;
+  // impossible : le fond restait un bandeau quasi opaque. La derivation est
+  // partagee avec l'apercu (`boiteDeTexte`) pour que l'ecran ne mente pas sur
+  // la couleur, l'alpha ou la marge du fond.
+  const boite = boiteDeTexte(preset);
+  const useBox = boite !== null;
+  const boxColor = boite ? withOpacity(preset.boxColor, boite.opacite) : "";
+  const boxBorderW = boite ? boite.bordure : 0;
 
   return [
     `fontcolor=${preset.fontColor}`,
@@ -180,7 +182,7 @@ function buildTextFilters(inputs: GraphInputs, withCuts: boolean): string {
   // La plaque masque le sous-titre d'origine : son opacite est independante
   // de celle du fond du nouveau texte, sinon un style discret laisserait
   // reapparaitre l'ancien sous-titre.
-  const plateColor = withOpacity(preset.boxColor, preset.plateOpacity ?? 0.92);
+  const plateColor = withOpacity(preset.boxColor, opacitePlaque(preset));
   const styleBits = buildStyleBits(preset);
 
   return cues

@@ -201,6 +201,101 @@ export const DEFAULT_MASKS: MaskZone[] = [
   { id: "tr", label: "Logo haut-droite", x: 0.72, y: 0.02, w: 0.28, h: 0.08, enabled: false },
 ];
 
+/** Fond peint par `drawtext` (`box=1:boxcolor=…:boxborderw=…`). */
+export type BoiteDeTexte = {
+  /** Couleur sans alpha, telle que le moteur la lit (`black`, `#RRGGBB`). */
+  couleur: string;
+  /** Alpha appliquee a cette couleur, 0…1. */
+  opacite: number;
+  /** Marge autour des glyphes, en pixels de la source. */
+  bordure: number;
+};
+
+/**
+ * Une seule derivation pour le graphe ffmpeg et pour l'apercu CSS.
+ *
+ * L'aperceu peignait un fond noir `rgba(0,0,0,project.boxOpacity)` avec 6×10 px
+ * de marge : un prereglage rose (`#FF0050@0.9`) donnait donc une plaque noire a
+ * l'ecran et rose a l'export, et la taille du fond ne correspondait pas a
+ * `boxborderw`. Ce que l'on regle a la souris doit etre ce que l'on voit.
+ */
+export function boiteDeTexte(preset: SubtitlePreset): BoiteDeTexte | null {
+  const opacite = Math.min(1, Math.max(0, preset.boxOpacity ?? 0.95));
+  // Un fond a peine visible n'est pas une plaque : le moteur ne la pose pas.
+  if (opacite <= 0.01) return null;
+  // Un prereglage qui declare `useBox: false` n'en pose pas, sauf si l'opacite
+  // est explicitement reglee : sans cette echappe, le curseur « Opacite du
+  // fond » restait mort sur le style par defaut, qui voyait son reglage
+  // traverse l'apercu sans jamais atteindre l'encodage.
+  if (preset.useBox === false && preset.boxOpacity === undefined) return null;
+  return {
+    couleur: preset.boxColor.replace(/@[\d.]+$/, ""),
+    opacite,
+    bordure: Math.max(preset.boxBorderW, 16),
+  };
+}
+
+/** Alpha de la plaque de recouvrement, telle que `buildTextFilters` la calcule. */
+export function opacitePlaque(preset: SubtitlePreset): number {
+  return Math.min(1, Math.max(0, preset.plateOpacity ?? 0.92));
+}
+
+/**
+ * La plaque qui masque le sous-titre d'origine : le cadre couvrant, avec sa
+ * couleur et son alpha. `null` des qu'aucun bandeau n'est actif — le moteur
+ * ne dessine alors aucun `drawbox`, l'apercu ne doit pas en inventer.
+ */
+export function plaqueDeBandeau(
+  masks: readonly MaskZone[],
+  preset: SubtitlePreset,
+): (MaskZone & { couleur: string; opacite: number }) | null {
+  const zone = cadreCouvrant(masks);
+  if (!zone) return null;
+  return {
+    ...zone,
+    couleur: preset.boxColor.replace(/@[\d.]+$/, ""),
+    opacite: opacitePlaque(preset),
+  };
+}
+
+const NOMS_COULEURS: Record<string, [number, number, number]> = {
+  black: [0, 0, 0],
+  white: [255, 255, 255],
+  red: [255, 0, 0],
+  green: [0, 128, 0],
+  blue: [0, 0, 255],
+  yellow: [255, 212, 0],
+  cyan: [0, 242, 234],
+  magenta: [255, 0, 255],
+  gray: [128, 128, 128],
+};
+
+/**
+ * Convertit une couleur FFmpeg (`black@0.55`, `#FF0050`) en CSS `rgba()`.
+ * `null` sur une valeur inconnue : l'apercu s'abstient plutot que d'inventer.
+ */
+export function couleurCss(couleur: string, alpha?: number): string | null {
+  const [base, alphaBrute] = couleur.split("@");
+  const a = alpha ?? (alphaBrute === undefined ? 1 : Number(alphaBrute));
+  if (!Number.isFinite(a)) return null;
+  const opacite = Math.round(Math.min(1, Math.max(0, a)) * 100) / 100;
+  const hex = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(base.trim());
+  let composantes: [number, number, number] | undefined;
+  if (hex) {
+    const corps = hex[1].length === 3 ? hex[1].replace(/./g, (c) => c + c) : hex[1];
+    composantes = [
+      parseInt(corps.slice(0, 2), 16),
+      parseInt(corps.slice(2, 4), 16),
+      parseInt(corps.slice(4, 6), 16),
+    ];
+  } else {
+    composantes = NOMS_COULEURS[base.trim().toLowerCase()];
+  }
+  if (!composantes) return null;
+  const [r, g, b] = composantes;
+  return `rgba(${r},${g},${b},${opacite})`;
+}
+
 export type SubtitleOverrides = Partial<
   Pick<
     SubtitlePreset,

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { buildStyleBits, withOpacity } from "./ffmpeg/graph";
 import { VIDEO_FILTERS, buildLookFilters, buildUpscaleFilter, getFilter } from "./filters";
-import { SUBTITLE_PRESETS } from "./presets";
+import { boiteDeTexte, SUBTITLE_PRESETS } from "./presets";
 
 describe("filtres visuels", () => {
   it("expose un équivalent CSS pour chaque filtre FFmpeg", () => {
@@ -93,5 +93,25 @@ describe("opacité des sous-titres", () => {
   it("propose un preset discret en premier choix", () => {
     expect(SUBTITLE_PRESETS[0].id).toBe("discret");
     expect(SUBTITLE_PRESETS[0].useBox).toBe(false);
+  });
+});
+
+describe("parité de l'aperçu avec le graphe", () => {
+  it("pose exactement le fond que buildStyleBits annonce, sur chaque préréglage", () => {
+    // L'atelier peint son fond avec `boiteDeTexte` ; le graphe, aussi. Si les
+    // deux se mettaient à diverger, ce que l'on règle à la souris cesserait
+    // d'être ce que l'export encodre — et la différence ne se verrait qu'après
+    // un rendu complet.
+    for (const preset of SUBTITLE_PRESETS) {
+      const boite = boiteDeTexte(preset);
+      const bits = buildStyleBits(preset);
+      if (!boite) {
+        expect(bits, preset.id).toContain("box=0");
+      } else {
+        expect(bits, preset.id).toContain(
+          `box=1:boxcolor=${boite.couleur}@${boite.opacite.toFixed(2)}:boxborderw=${boite.bordure}`,
+        );
+      }
+    }
   });
 });

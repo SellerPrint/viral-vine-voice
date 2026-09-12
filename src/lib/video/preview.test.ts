@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import { buildBlurChain, type Rect } from "./ffmpeg/graph";
-import { buildPreviewArgs } from "./preview";
+import { buildPreviewArgs, chainePlaque } from "./preview";
+import { SUBTITLE_PRESETS, type MaskZone } from "./presets";
 
 const rect = (over: Partial<Rect> = {}): Rect => ({ x: 0, y: 1050, w: 720, h: 180, ...over });
 
@@ -125,5 +126,31 @@ describe("buildPreviewArgs", () => {
     const zone = rect();
     const graph = buildPreviewArgs([zone], [], "", "medium")[1];
     expect(graph).toContain(buildBlurChain("medium", zone));
+  });
+});
+
+describe("chainePlaque", () => {
+  const bande: MaskZone = {
+    id: "bottom",
+    label: "bas",
+    x: 0.02,
+    y: 0.75,
+    w: 0.96,
+    h: 0.14,
+    enabled: true,
+  };
+  const preset = SUBTITLE_PRESETS.find((p) => p.useBox)!;
+
+  it("suit le rectangle du cadre couvrant", () => {
+    const [chaine] = chainePlaque([bande], preset);
+    expect(chaine).toContain("x=iw*0.020:y=ih*0.750:w=iw*0.960:h=ih*0.140");
+    // l'ancienne valeur figee, qui ne suivait rien du tout
+    expect(chaine).not.toContain("ih*0.82");
+    expect(chaine).toContain(`color=${preset.boxColor.replace(/@[\d.]+$/, "")}@`);
+  });
+
+  it("ne pose rien sans bandeau actif, comme le graphe", () => {
+    expect(chainePlaque([{ ...bande, enabled: false }], preset)).toEqual([]);
+    expect(chainePlaque(undefined, preset)).toEqual([]);
   });
 });

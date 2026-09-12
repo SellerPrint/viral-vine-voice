@@ -2,7 +2,13 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 
 import { getFilter } from "@/lib/video/filters";
 import { formatClock } from "@/lib/editor/edl";
-import { ancreLegende, type MaskZone } from "@/lib/video/presets";
+import {
+  ancreLegende,
+  boiteDeTexte,
+  couleurCss,
+  plaqueDeBandeau,
+  type MaskZone,
+} from "@/lib/video/presets";
 import { clampZone } from "@/lib/editor/project";
 
 import { isSelected } from "@/lib/editor/store";
@@ -417,6 +423,12 @@ export function PreviewStage() {
     dispatch({ type: "seek", time: next ?? (direction > 0 ? 0 : derived.timelineDuration) });
   };
 
+  // Fond du texte et plaque : les deux valeurs viennent des memes fonctions
+  // que le graphe ffmpeg, pour que regler l'un ne deforme pas l'autre a
+  // l'ecran.
+  const boite = boiteDeTexte(preset);
+  const plaque = ui.compare ? null : plaqueDeBandeau(project.masks, preset);
+
   const subtitleStyle = (fontsize: number) =>
     ({
       fontSize: `${Math.max(9, fontsize * (scale || 1))}px`,
@@ -443,14 +455,17 @@ export function PreviewStage() {
             }px ${4 * (scale || 1)}px rgba(0,0,0,.75)`,
           }
         : {}),
-      ...(preset.useBox && project.boxOpacity > 0.02
-        ? {
-            background: `rgba(0,0,0,${project.boxOpacity})`,
-            padding: `${6 * (scale || 1)}px ${10 * (scale || 1)}px`,
-            borderRadius: 4,
-          }
-        : {}),
     }) as React.CSSProperties;
+
+  // Le fond se pose sur la ligne, pas sur le bloc : `drawtext` embrasse
+  // `text_w` encadre de `boxborderw`, la largeur de l'image n'y change rien.
+  // Couleur du préréglage, alpha réel, marge en pixels de la source.
+  const styleBoite: React.CSSProperties | undefined = boite
+    ? {
+        background: couleurCss(boite.couleur, boite.opacite) ?? undefined,
+        padding: `${Math.max(1, boite.bordure * (scale || 1))}px`,
+      }
+    : undefined;
 
   return (
     <div className="ed-stage">
@@ -494,6 +509,24 @@ export function PreviewStage() {
             />
 
             <div ref={overlayRef} className="ed-overlay">
+              {/* La plaque de recouvrement : meme rectangle, meme couleur,
+                  meme alpha que le `drawbox` du graphe. Elle se pose que
+                  `ui.showMasks` soit actif ou non - c'est l'export qui la
+                  peint, l'apercu doit la montrer. C'est le cadre, dessine
+                  au-dessus d'elle, qui la regle. */}
+              {plaque ? (
+                <div
+                  className="ed-plate"
+                  data-testid="plaque"
+                  style={{
+                    left: `${plaque.x * 100}%`,
+                    top: `${plaque.y * 100}%`,
+                    width: `${plaque.w * 100}%`,
+                    height: `${plaque.h * 100}%`,
+                    background: couleurCss(plaque.couleur, plaque.opacite) ?? "transparent",
+                  }}
+                />
+              ) : null}
               {/* Sous-titres d'aperçu, tels qu'incrustés. Cette couche de
                   découpe rend comme le moteur : un bloc ancré sur `yAnchor`
                   grandit vers le bas, et le cadrage rogne ce qui dépasse du
@@ -512,6 +545,7 @@ export function PreviewStage() {
                         volait le geste — tirer le texte écrasait sa hauteur. */}
                     <span
                       className="ed-subtitle-text"
+                      style={styleBoite}
                       onPointerDown={(event) => debuterLegende(event, "place")}
                       title="Légende — glisse la ligne pour la monter ou la descendre, la poignée blanche pour changer son corps"
                     >

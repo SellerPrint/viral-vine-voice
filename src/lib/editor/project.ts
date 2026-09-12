@@ -216,7 +216,15 @@ export function projectKeeps(project: Project): Range[] {
 }
 
 export function projectPreset(project: Project): SubtitlePreset {
-  return resolvePresetById(project.presetId, project.overrides);
+  const preset = resolvePresetById(project.presetId, project.overrides);
+  // Le reglage « Opacite du fond » de l'atelier est la source de verite du
+  // fond du texte, ici et pas ailleurs : la voie locale de construit son
+  // preset avec cette fonction, et l'onglet Export replie le meme champ dans
+  // `overrides`. Sans ce repli, le curseur changeait l'apercu et le rendu
+  // serveur mais laissait le rendu local au fond du prereglage - un reglage
+  // qui ne se voyait que sur la moitie des chemins.
+  if ("boxOpacity" in project.overrides) return preset;
+  return { ...preset, boxOpacity: project.boxOpacity };
 }
 
 export function resolvePresetById(id: string, overrides: SubtitleOverrides): SubtitlePreset {

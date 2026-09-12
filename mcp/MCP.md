@@ -75,7 +75,7 @@ npm run mcp -- --outils   # liste le contrat des 17 outils
 8. `exporter_config`, puis dans l'atelier : Réglages → _Importer un fichier de
    configuration_.
 
-## Trois règles que le moteur applique et qu'aucun outil ne contourne
+## Quatre règles que le moteur applique et qu'aucun outil ne contourne
 
 - La légende se **centre horizontalement** : `drawtext` fait `x=(w-text_w)/2`. Il
   n'existe aucune ancre horizontale dans le contrat d'options, donc aucun outil ne
@@ -87,6 +87,14 @@ npm run mcp -- --outils   # liste le contrat des 17 outils
 - Une **largeur ou une hauteur plaquée sur un bord ne peut pas s'en écarter** :
   comme à la souris, les valeurs hors image sont ramenées dans le cadre et
   signalées dans `bornes`.
+- Le **fond de la légende obéit à l'opacité, pas au seul préréglage** : le graphe
+  pose `box=1:boxcolor=<couleur du préréglage>@<opacité>:boxborderw=max(preset, 16)`
+  et l'aperçu CSS lit la même fonction (`boiteDeTexte`). Un préréglage qui déclare
+  `useBox: false` (dont `capcut-pop`, le style par défaut) ne peint rien tant que
+  `opaciteFond` n'est pas demandé — d'où l'intérêt de le passer explicitement.
+  La **plaque** qui masque l'ancien sous-titre, elle, vient du cadre couvrant
+  (`couleurFond` du préréglage, alpha `0,92` par défaut) : agrandir le bandeau
+  agrandit la plaque, à l'écran comme à l'export.
 
 ## Les bornes, et pourquoi elles sont doublées
 

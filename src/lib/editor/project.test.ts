@@ -172,6 +172,16 @@ describe("projectKeeps / presets", () => {
       SUBTITLE_PRESETS[0].id,
     );
   });
+  it("le réglage « Opacité du fond » de l'atelier gouverne le fond, sur toutes les voies", () => {
+    // La voie locale de rendu construit son preset ici, l'onglet Export replie
+    // le même champ dans `overrides` : lire le preset sans ce repli laissait le
+    // curseur sans effet sur l'encodage local.
+    const base = SUBTITLE_PRESETS.find((p) => p.useBox)!;
+    const projet = { ...EMPTY_PROJECT, presetId: base.id, boxOpacity: 0.25 };
+    expect(projectPreset(projet).boxOpacity).toBe(0.25);
+    // une surcharge du fichier de réglages garde la main sur le champ brut
+    expect(projectPreset({ ...projet, overrides: { boxOpacity: 0.8 } }).boxOpacity).toBe(0.8);
+  });
 });
 
 describe("clampZone", () => {

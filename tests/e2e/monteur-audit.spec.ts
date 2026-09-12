@@ -313,6 +313,65 @@ test("les raccourcis commandent le plan, et Ctrl+Z les efface", async ({ page })
   await expect(textes).toHaveCount(avantTextes);
 });
 
+test("la plaque de recouvrement est peinte sur le cadre, et le fond du texte obéit au curseur", async ({
+  page,
+}) => {
+  await openDemo(page);
+  await showFirstCue(page);
+
+  const plaque = page.getByTestId("plaque");
+  await expect(plaque).toBeVisible();
+
+  const mesure = () =>
+    page.evaluate(() => {
+      const rect = (el: Element) => {
+        const r = el.getBoundingClientRect();
+        return { x: Math.round(r.x), y: Math.round(r.y), h: Math.round(r.height) };
+      };
+      const plaque = document.querySelector("[data-testid='plaque']")!;
+      const ligne = document.querySelector(".ed-subtitle-text")!;
+      return {
+        cadre: rect(document.querySelector(".ed-mask")!),
+        boite: rect(plaque),
+        couleur: getComputedStyle(plaque).backgroundColor,
+        fond: getComputedStyle(ligne).backgroundColor,
+        marge: getComputedStyle(ligne).paddingTop,
+      };
+    });
+
+  const avant = await mesure();
+  // Le rectangle peint est le rectangle réglé : même position, même hauteur.
+  expect(avant.boite).toEqual(avant.cadre);
+  // Et il est opaque assez pour masquer l'ancien sous-titre, contrairement à ce
+  // que laissait croire le simple contour bleu.
+  expect(avant.couleur).not.toBe("rgba(0, 0, 0, 0)");
+
+  // Étirer la poignée sud du bandeau : la plaque s'agrandit avec lui. Avant la
+  // correction, l'aperçu du moteur la peignait à une place fixe (0,82 / 0,14)
+  // et seul le contour bleu suivait la souris.
+  const poignee = await page.locator('.ed-mask-handle[data-corner="s"]').first().boundingBox();
+  await page.mouse.move(poignee!.x + poignee!.width / 2, poignee!.y + poignee!.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(poignee!.x + poignee!.width / 2, poignee!.y + poignee!.height / 2 + 40, {
+    steps: 8,
+  });
+  await page.mouse.up();
+  await expect
+    .poll(() => mesure().then((m) => m.boite.h), { timeout: 5_000 })
+    .toBeGreaterThan(avant.boite.h + 20);
+  const etire = await mesure();
+  expect(etire.boite).toEqual(etire.cadre);
+
+  // Le fond du texte, lui, est commandé par le curseur « Opacité du fond » —
+  // et prend la couleur du préréglage, pas un noir imposé.
+  await page.locator('.ed-insp-tabs [role="tab"]:has-text("Style")').click();
+  await page.getByLabel("Opacité du fond").fill("0.6");
+  await expect
+    .poll(() => mesure().then((m) => m.fond), { timeout: 5_000 })
+    .toMatch(/rgba\(0, 0, 0, 0\.6\)/);
+  expect(Number.parseFloat((await mesure()).marge)).toBeGreaterThan(4);
+});
+
 test("l'atelier retient l'interface ; le montage, lui, voyage par le fichier", async ({ page }) => {
   await openDemo(page);
 

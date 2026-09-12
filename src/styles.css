@@ -758,6 +758,15 @@ input[type="range"].ed-slider::-moz-range-thumb {
   border-radius: calc(8px * var(--ed-ui));
   background: #000;
 }
+/* La plaque de recouvrement, telle que `drawbox` la pose : meme rectangle,
+   meme couleur, aucun geste - elle ne saisit rien, c'est le cadre au-dessus
+   qui la regle. */
+.ed-plate {
+  position: absolute;
+  pointer-events: none;
+  z-index: 0;
+}
+
 .ed-subtitle-clip {
   position: absolute;
   inset: 0;

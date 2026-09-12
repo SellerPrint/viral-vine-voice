@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 
-import { ancreLegende, cadreCouvrant, type MaskZone } from "./presets";
+import {
+  ancreLegende,
+  boiteDeTexte,
+  cadreCouvrant,
+  couleurCss,
+  plaqueDeBandeau,
+  SUBTITLE_PRESETS,
+  type MaskZone,
+} from "./presets";
 
 /**
  * Le cadre couvrant et l'ancre qu'il impose.
@@ -57,5 +65,58 @@ describe("ancreLegende", () => {
   it("retombe sur le réglage du style quand aucun cadre ne couvre", () => {
     expect(ancreLegende([zone({ enabled: false })], 0.42)).toBe(0.42);
     expect(ancreLegende([], 0.42)).toBe(0.42);
+  });
+});
+
+describe("boiteDeTexte", () => {
+  const avecFond = SUBTITLE_PRESETS.find((p) => p.useBox)!;
+
+  it("garde la couleur du préréglage et la marge de `boxborderw`", () => {
+    const boite = boiteDeTexte(avecFond)!;
+    expect(boite.couleur).toBe(avecFond.boxColor.replace(/@[\d.]+$/, ""));
+    expect(boite.bordure).toBe(Math.max(avecFond.boxBorderW, 16));
+    expect(boite.opacite).toBe(Math.min(1, avecFond.boxOpacity ?? 0.95));
+  });
+
+  it("s'éteint sous 1 % d'opacité", () => {
+    expect(boiteDeTexte({ ...avecFond, boxOpacity: 0.005 })).toBeNull();
+  });
+
+  it("un réglage explicite réveille un préréglage sans fond", () => {
+    // Sans cette échappe, le curseur « Opacité du fond » ne commandait rien sur
+    // le style par défaut, qui déclare `useBox: false` — on voyait son effet
+    // dans l'aperçu et jamais dans le fichier.
+    const sobre = SUBTITLE_PRESETS.find((p) => p.useBox === false)!;
+    expect(boiteDeTexte(sobre)).toBeNull();
+    expect(boiteDeTexte({ ...sobre, boxOpacity: 0.4 })?.opacite).toBe(0.4);
+  });
+});
+
+describe("couleurCss", () => {
+  it("convertit une couleur FFmpeg en rgba", () => {
+    expect(couleurCss("black@0.55")).toBe("rgba(0,0,0,0.55)");
+    expect(couleurCss("#FF0050")).toBe("rgba(255,0,80,1)");
+    expect(couleurCss("#0f8", 0.5)).toBe("rgba(0,255,136,0.5)");
+  });
+
+  it("ignore une valeur qu'il ne peut pas rendre, plutôt que d'inventer", () => {
+    expect(couleurCss("peinture-murale@0.5")).toBeNull();
+    expect(couleurCss("#GG0050")).toBeNull();
+  });
+});
+
+describe("plaqueDeBandeau", () => {
+  const preset = SUBTITLE_PRESETS.find((p) => p.useBox)!;
+
+  it("reprend le rectangle du cadre couvrant et l'alpha de la plaque", () => {
+    const plaque = plaqueDeBandeau([zone({ x: 0.05, y: 0.7, w: 0.9, h: 0.2 })], preset)!;
+    expect(plaque).toMatchObject({ x: 0.05, y: 0.7, w: 0.9, h: 0.2 });
+    expect(plaque.opacite).toBe(Math.min(1, preset.plateOpacity ?? 0.92));
+    expect(plaque.couleur).toBe(preset.boxColor.replace(/@[\d.]+$/, ""));
+  });
+
+  it("ne peint rien quand aucun bandeau ne couvre", () => {
+    expect(plaqueDeBandeau([zone({ enabled: false })], preset)).toBeNull();
+    expect(plaqueDeBandeau([zone({ id: "logo-haut", label: "logo" })], preset)).toBeNull();
   });
 });

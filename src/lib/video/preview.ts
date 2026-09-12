@@ -20,8 +20,25 @@ import {
   resolveMasks,
   withOpacity,
 } from "./ffmpeg/graph";
-import type { MaskZone, SubtitlePreset } from "./presets";
+import { cadreCouvrant, opacitePlaque, type MaskZone, type SubtitlePreset } from "./presets";
 import { wrapLines } from "./subtitles/cues";
+
+/**
+ * Le `drawbox` de la plaque de recouvrement, aux coordonnees du cadre couvrant.
+ *
+ * Exporte a part pour etre verifie sans FFmpeg : la plaque etait figee a
+ * `y=ih*0.82:h=ih*0.14` dans cet apercu, alors que le graphe la pose sur la zone
+ * reglee dans la scene - l'image de controle mentait des que l'on tirait une
+ * poignee.
+ */
+export function chainePlaque(masks: MaskZone[] | undefined, preset: SubtitlePreset): string[] {
+  const cover = masks ? cadreCouvrant(masks) : undefined;
+  if (!cover) return [];
+  const plate = withOpacity(preset.boxColor, opacitePlaque(preset));
+  return [
+    `drawbox=x=iw*${cover.x.toFixed(3)}:y=ih*${cover.y.toFixed(3)}:w=iw*${cover.w.toFixed(3)}:h=ih*${cover.h.toFixed(3)}:color=${plate}:t=fill`,
+  ];
+}
 
 export type PreviewOptions = {
   filterId?: string;
@@ -167,10 +184,10 @@ export async function renderPreviewFrame(
       await ff.writeFile(textFile, new TextEncoder().encode(wrapped));
 
       const anchor = subYAnchor ?? preset.yAnchor;
-      const plate = withOpacity(preset.boxColor, preset.plateOpacity ?? 0.92);
-      if ((preset.plateOpacity ?? 0) > 0.01) {
-        chain.push(`drawbox=x=0:y=ih*0.82:w=iw:h=ih*0.14:color=${plate}:t=fill`);
-      }
+      // La plaque suit le cadre couvrant, comme dans `buildTextFilters` : elle
+      // etait figee a `y=ih*0.82:h=ih*0.14`, donc l'apercu cote moteur montrait
+      // un bandeau mal place des que l'on redimensionnait la zone dans la scene.
+      chain.push(...chainePlaque(masks, preset));
       chain.push(
         `drawtext=fontfile=font.ttf:textfile=${textFile}:reload=0:expansion=none:${buildStyleBits(preset)}:x=(w-text_w)/2:y=h*${anchor.toFixed(3)}-text_h/2`,
       );
