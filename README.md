@@ -177,7 +177,9 @@ avec seulement `VERCEL=1` dans le shell, `npm run build` produit
    `E2E_BASE_URL=https://… npx playwright test -g "en-têtes"`. Le cas est
    sauté en local parce que seul un déploiement réel applique `vercel.json`.
 
-8. **Fil MCP** : `POST /api/mcp` parle le JSON-RPC de `mcp/serveur.mjs` — le même
+8. **Fil MCP** : Le fil s'appelle à `https://viral-vine-voice.vercel.app/api/mcp` (le volet « Agent de
+   montage » de l'atelier affiche l'origine où il tourne, sans configuration).
+   `POST /api/mcp` parle le JSON-RPC de `mcp/serveur.mjs` — le même
    dispatcheur, pas une seconde implémentation — sans dépendance ni build. Il est
    **fermé par défaut** : sans `MCP_TOKEN` dans les variables du projet, la route
    répond 503 (un atelier de montage ne s'ouvre pas au monde par accident). Avec

@@ -50,6 +50,11 @@ npm run mcp -- --outils   # liste le contrat des 17 outils
 
 ## Le fil HTTP — le même serveur sur Vercel
 
+**URL publique du fil, sur le déploiement de ce dépôt :**
+`https://viral-vine-voice.vercel.app/api/mcp` (le volet « Agent de montage » de
+l'onglet Projet affiche de lui-même l'origine où il est servi — sur un aperçu de
+brouillon, sur `*.vercel.app`, sur un domaine branché, sans rien changer ici).
+
 Une fonction serverless ne tient pas un tuyau ouvert : le fil stdio n'y a donc
 pas sa place. Le **même** dispatcheur JSON-RPC est posé derrière une route HTTP,
 `POST /api/mcp` sur le déploiement (`src/routes/api.mcp.ts` →
@@ -68,12 +73,12 @@ Deux façons de travailler :
 
 ```bash
 # 1) collant : initialize rend un Mcp-Session-Id, on le renvoie à chaque appel
-curl -sX POST https://<domaine>/api/mcp \
+curl -sX POST https://viral-vine-voice.vercel.app/api/mcp \
   -H "authorization: Bearer $MCP_TOKEN" -H 'content-type: application/json' \
   -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' -D -
 
 # 2) sans état : chaque appel porte le document, le nouveau lui revient
-curl -sX POST https://<domaine>/api/mcp \
+curl -sX POST https://viral-vine-voice.vercel.app/api/mcp \
   -H "authorization: Bearer $MCP_TOKEN" -H 'content-type: application/json' \
   -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{
          "name":"montage_energetique",
@@ -97,7 +102,7 @@ version, vérifiez la vôtre avant d'accuser le serveur) :
 {
   "mcpServers": {
     "viraldub-monteur": {
-      "url": "https://<domaine>/api/mcp",
+      "url": "https://viral-vine-voice.vercel.app/api/mcp",
       "headers": { "Authorization": "Bearer <MCP_TOKEN>" },
     },
   },
@@ -105,7 +110,7 @@ version, vérifiez la vôtre avant d'accuser le serveur) :
 ```
 
 - **Claude Desktop, en remote** : `Settings → Connectors → Add custom
-connector`, avec l'URL de l'atelier (`https://<domaine>/api/mcp`). Le jeton se
+connector`, avec l'URL de l'atelier (`https://viral-vine-voice.vercel.app/api/mcp`). Le jeton se
   met dans le connector (en-tête `Authorization`), pas dans
   `claude_desktop_config.json` — ce fichier ne valide que les entrées `command`,
   et un `url` qu'on y glisse est silencieusement ignoré ou fait partir l'app en
