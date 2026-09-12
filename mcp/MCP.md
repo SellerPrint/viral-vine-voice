@@ -124,9 +124,12 @@ connector`, avec l'URL de l'atelier (`https://viral-vine-voice.vercel.app/api/mc
     --header "Authorization: Bearer <MCP_TOKEN>"
   ```
 
-**Ce que le fil HTTP ne fait pas** : il ne tient pas de flux `text/event-stream`
-— un `GET` avec `Accept: text/event-stream` reçoit un 405 qui le dit, plutôt
-qu'un JSON que le client lirait comme un flux vide. Une requête = une réponse,
+**Ce que le fil HTTP ne fait pas** : il ne tient pas de flux `text/event-stream`.
+Un `GET` qui réclame un flux, ou un `POST` dont l'`Accept` ne saurait lire _que_
+du flux, reçoit un 405 qui le dit — plutôt qu'un JSON que le client lirait comme
+un flux vide. Un client conforme à la spécification Streamable HTTP, lui, annonce
+`Accept: application/json, text/event-stream` sur chaque appel : il est servi en
+JSON, puisque c'est au serveur de choisir le format. Une requête = une réponse,
 et c'est ce qui le rend fiable sur une fonction serverless, où un flux ouvert
 n'a aucune garantie de durer plus que l'appel. Pour la même raison, quand une
 conversation doit survivre à un redéploiement, travaillez en mode sans état

@@ -108,6 +108,52 @@ describe("la porte", () => {
     expect(preflet.status).toBe(204);
     expect(preflet.headers.get("access-control-allow-headers")).toContain("mcp-session-id");
   });
+
+  it("un POST conforme a la specification est servi en JSON", async () => {
+    // La specification Streamable HTTP impose au client d'annoncer les deux
+    // deux acceptations ; y voir une demande de flux écartait tous les
+    // clients corrects. Le JSON revient donc normalement.
+    const transport = CREER_TRANSPORT({ secret: "s3cret" });
+    const reponse = await transport.fetch(
+      new Request("http://localhost/api/mcp", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          accept: "application/json, text/event-stream",
+          authorization: "Bearer s3cret",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "initialize",
+          params: {
+            protocolVersion: "2025-06-18",
+            clientInfo: { name: "t", version: "1" },
+            capabilities: {},
+          },
+        }),
+      }),
+    );
+    expect(reponse.status).toBe(200);
+    const corps = await reponse.json();
+    expect(corps.result.serverInfo.name).toBe("viraldub-monteur");
+    expect(reponse.headers.get("mcp-session-id")).toMatch(/^[0-9a-f-]{8,}/);
+  });
+
+  it("un POST qui ne sait lire que le flux recoit le refus nomme", async () => {
+    const transport = CREER_TRANSPORT({ secret: "s3cret" });
+    const reponse = await transport.fetch(
+      new Request("http://localhost/api/mcp", {
+        method: "POST",
+        headers: { "content-type": "application/json", accept: "text/event-stream" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} }),
+      }),
+    );
+    expect(reponse.status).toBe(405);
+    expect(reponse.headers.get("allow")).toBe("POST");
+    const corps = await reponse.json();
+    expect(corps.refus).toContain("mcp-remote");
+  });
 });
 
 describe("la session collante", () => {

@@ -145,8 +145,21 @@ export function CREER_TRANSPORT({
       // Un client Streamable HTTP ouvre un `GET` pour recevoir un flux d'evenements.
       // Ce fil n'en sert pas : mieux vaut le dire en 405 qu'un JSON avale comme un
       // flux vide, ce qui se traduit cote client par un silence inexpliquable.
+      //
+      // Attention au zele : la specification impose au client d'envoyer
+      // `Accept: application/json, text/event-stream` sur chaque POST, parce que
+      // le serveur choisit l'un ou l'autre. Refuser des que l'en-tete mentionne
+      // le flux écartait donc tous les clients conformes — Cursor, `mcp-remote`,
+      // les SDK officiels. On ne refuse un POST que si le client est incapable
+      // de lire du JSON ; un `GET` qui reclame un flux reste refuse.
       const accepte = request.headers.get("accept") ?? "";
-      if (accepte.includes("text/event-stream")) {
+      const veutLeFlux = /text\/event-stream/.test(accepte);
+      const litDuJson =
+        /application\/json/.test(accepte) ||
+        /application\/\*/.test(accepte) ||
+        /\*\/\*/.test(accepte) ||
+        accepte.trim() === "";
+      if (veutLeFlux && (method !== "POST" || !litDuJson)) {
         return json(
           405,
           {

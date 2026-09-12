@@ -37,6 +37,30 @@ test("POST /api/mcp ne s'ouvre pas tout seul", async ({ request }) => {
   expect((await reponse.json()).refus).toMatch(/MCP_TOKEN|Bearer/);
 });
 
+test("un client conforme n'est pas éconduit parce qu'il annonce le flux", async ({ request }) => {
+  // La specification Streamable HTTP impose `Accept: application/json,
+  // text/event-stream` sur chaque POST, le serveur choisissant le format.
+  // Refuser des que le flux etait mentionne ecartait Cursor, `mcp-remote` et
+  // les SDK officiels : la requete doit descendre jusqu'a la garde d'acces,
+  // pas mourir sur l'en-tete.
+  const reponse = await request.post("/api/mcp", {
+    headers: { accept: "application/json, text/event-stream" },
+    data: {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "initialize",
+      params: {
+        protocolVersion: "2025-06-18",
+        clientInfo: { name: "e2e", version: "1" },
+        capabilities: {},
+      },
+    },
+  });
+  expect(reponse.status()).not.toBe(405);
+  expect([401, 503]).toContain(reponse.status());
+  expect((await reponse.json()).refus).toMatch(/MCP_TOKEN|Bearer/);
+});
+
 test("les méthodes qui ne servent à rien sont refusées avec l'allow", async ({ request }) => {
   const reponse = await request.fetch("/api/mcp", { method: "PUT", data: "{}" });
   expect(reponse.status()).toBe(405);
