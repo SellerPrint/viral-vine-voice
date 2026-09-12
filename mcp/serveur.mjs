@@ -33,6 +33,7 @@
  */
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { isAbsolute, relative, resolve } from "node:path";
 
 import {
@@ -76,9 +77,9 @@ import {
  * une autre recoit la notre : faire semblant de parler une langue qu'on
  * n'implemente pas produit un client qui se branche et ne comprend rien.
  */
-const VERSIONS_PROTOCOLE = ["2024-11-05", "2025-03-26", "2025-06-18"];
-const NOM_SERVEUR = "viraldub-monteur";
-const VERSION = "0.1.0";
+export const VERSIONS_PROTOCOLE = ["2024-11-05", "2025-03-26", "2025-06-18"];
+export const NOM_SERVEUR = "viraldub-monteur";
+export const VERSION = "0.1.0";
 
 /* -------------------------------------------------------------------------- */
 /* les outils                                                                  */
@@ -125,7 +126,7 @@ const RECETTES = {
   },
 };
 
-const OUTILS = [
+export const OUTILS = [
   {
     name: "etat",
     description:
@@ -490,10 +491,16 @@ const OUTILS = [
     inputSchema: objet({
       chemin: chaine("Chemin d'écriture, sous le dossier du projet, se terminant par .json"),
     }),
-    run: (projet, entrees) => {
+    run: (projet, entrees, contexte = {}) => {
       const config = versConfig(projet);
       const texte = JSON.stringify(config, null, 2);
       if (!entrees.chemin) return { projet, config, octets: Buffer.byteLength(texte, "utf8") };
+      if (contexte.disque === false) {
+        throw new RangeError(
+          "ce fil n'écrit pas sur le disque : rappelle exporter_config sans `chemin`, " +
+            "le document revient dans la réponse à chaque appel",
+        );
+      }
       const cible = cheminAutorise(entrees.chemin);
       writeFileSync(cible, `${texte}\n`, "utf8");
       return {
@@ -511,7 +518,12 @@ const OUTILS = [
       chemin: chaine("Chemin du fichier, sous le dossier du projet"),
       config: chaine("Le JSON lui-même", { maxLength: 70000 }),
     }),
-    run: (projet, entrees) => {
+    run: (projet, entrees, contexte = {}) => {
+      if (entrees.chemin && contexte.disque === false) {
+        throw new RangeError(
+          "ce fil ne lit pas le disque : passe le JSON dans `config`, pas un chemin",
+        );
+      }
       const brut = entrees.config ?? readFileSync(cheminAutorise(entrees.chemin), "utf8");
       if (Buffer.byteLength(brut, "utf8") > 64 * 1024)
         throw new RangeError("fichier trop volumineux pour une configuration");
@@ -559,102 +571,108 @@ function cheminAutorise(entree) {
 }
 
 /* -------------------------------------------------------------------------- */
-/* boucle JSON-RPC                                                             */
+/* le fil JSON-RPC                                                            */
 /* -------------------------------------------------------------------------- */
 
-const args = process.argv.slice(2);
-const cheminProjet = valeurDArgument(args, "--projet");
-const cheminConfig = valeurDArgument(args, "--config");
-
-function valeurDArgument(listeArgs, drapeau) {
-  const index = listeArgs.indexOf(drapeau);
-  return index >= 0 ? listeArgs[index + 1] : undefined;
-}
-
-let projet = nouveauProjet({ nom: "montage" });
-const etatInitial = () => {
+/**
+ * Une session : un document de montage, et le fil JSON-RPC qui le lit.
+ *
+ * Le `traiteur` ne connait ni stdin ni stdout — il reçoit un message et rend la
+ * réponse. C'est ce qui permet au fil stdio (`mcp/serveur.mjs`) et au fil HTTP
+ * (`mcp/http.mjs`, donc Vercel) de partager exactement le même protocole : un
+ * seul endroit où `initialize`, `tools/list` et `tools/call` sont écrits, donc
+ * aucun écart possible entre le bureau et le déploiement.
+ *
+ * `disque` ferme les deux outils qui touchent au système de fichiers. Sur
+ * Vercel le système de fichiers est la temporaire du froid : promettre
+ * `exporter_config` là-bas ferait croire à un fichier que personne ne retrouvera
+ * — le document revient donc dans la réponse, et c'est tout.
+ */
+export function CREER_SESSION(options = {}) {
+  const { disque = true, cheminProjet, cheminConfig, surGeste } = options;
+  let projet = options.projet ?? nouveauProjet({ nom: "montage" });
   if (cheminConfig && existsSync(cheminConfig)) {
     projet = depuisConfig(JSON.parse(readFileSync(cheminConfig, "utf8")));
   } else if (cheminProjet && existsSync(cheminProjet)) {
     projet = JSON.parse(readFileSync(cheminProjet, "utf8"));
   }
-};
-etatInitial();
 
-const ecrire = (message) => {
-  process.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", ...message })}\n`);
-};
-const reponse = (id, result) => ecrire({ id, result });
-const erreur = (id, code, message) => ecrire({ id, error: { code, message } });
+  const OUTILS_PAR_NOM = new Map(OUTILS.map((o) => [o.name, o]));
+  const reponse = (id, result) => ({ id, result });
+  const erreur = (id, code, message) => ({ id, error: { code, message } });
 
-const OUTILS_PAR_NOM = new Map(OUTILS.map((o) => [o.name, o]));
+  /** Traite un message JSON-RPC et rend la réponse à écrire, ou `null`. */
+  function traiter(message) {
+    const { id, method, params } = message ?? {};
 
-function traiter(message) {
-  const { id, method, params } = message;
-
-  if (method === "initialize") {
-    return reponse(id, {
-      protocolVersion: VERSIONS_PROTOCOLE.includes(params?.protocolVersion)
-        ? params.protocolVersion
-        : VERSIONS_PROTOCOLE[0],
-      capabilities: { tools: { listChanged: false } },
-      serverInfo: {
-        name: NOM_SERVEUR,
-        title: "Atelier ViralDub — montage",
-        version: VERSION,
-      },
-      instructions: [
-        "Tu composes un plan de montage, tu ne rends rien : les nombres et le texte que tu poses décrivent un fichier que l'humain importe dans l'atelier.",
-        "Ordre qui marche : etat → (vider_pistes si besoin) → blocs de texte et de voix → couper_au_rythme ou ajouter_coupe → regler_cadres → regler_style → regler_options → valider → exporter_config.",
-        "Trois règles que le moteur applique et que tu ne peux pas contourner : la légende se centre horizontalement (aucun ancrage de ce côté) ; un cadre actif touchant le bas ou le haut du plan aspire la légende à son centre ; une taille de cadre plaquée sur un bord ne peut pas s'en écarter.",
-        "Après chaque série de gestes, appelle valider : une sortie muette ou un bloc hors du plan s'y voit, pas dans un message d'erreur d'export.",
-      ].join("\n"),
-    });
-  }
-
-  if (method === "ping") return reponse(id, {});
-
-  if (method === "tools/list") {
-    return reponse(id, {
-      tools: OUTILS.map(({ run, ...description }) => description),
-    });
-  }
-
-  if (method === "tools/call") {
-    const nom = params?.name;
-    const outil = OUTILS_PAR_NOM.get(nom);
-    if (!outil) {
-      return erreur(id, -32602, `outil inconnu : ${String(nom)}`);
+    if (method === "initialize") {
+      return reponse(id, {
+        protocolVersion: VERSIONS_PROTOCOLE.includes(params?.protocolVersion)
+          ? params.protocolVersion
+          : VERSIONS_PROTOCOLE[0],
+        capabilities: { tools: { listChanged: false } },
+        serverInfo: {
+          name: NOM_SERVEUR,
+          title: "Atelier ViralDub — montage",
+          version: VERSION,
+        },
+        instructions: [
+          "Tu composes un plan de montage, tu ne rends rien : les nombres et le texte que tu poses décrivent un fichier que l'humain importe dans l'atelier.",
+          "Ordre qui marche : etat → (vider_pistes si besoin) → blocs de texte et de voix → couper_au_rythme ou ajouter_coupe → regler_cadres → regler_style → regler_options → valider → exporter_config.",
+          "Trois règles que le moteur applique et que tu ne peux pas contourner : la légende se centre horizontalement (aucun ancrage de ce côté) ; un cadre actif touchant le bas ou le haut du plan aspire la légende à son centre ; une taille de cadre plaquée sur un bord ne peut pas s'en écarter.",
+          "Après chaque série de gestes, appelle valider : une sortie muette ou un bloc hors du plan s'y voit, pas dans un message d'erreur d'export.",
+        ].join("\n"),
+      });
     }
-    try {
-      const sortieOutil = outil.run(projet, params?.arguments ?? {});
-      if (sortieOutil.projet) {
-        projet = sortieOutil.projet;
-        if (cheminProjet) sauvegarder(cheminProjet, projet);
+
+    if (method === "ping") return reponse(id, {});
+
+    if (method === "tools/list") {
+      return reponse(id, { tools: OUTILS.map(({ run, ...description }) => description) });
+    }
+
+    if (method === "tools/call") {
+      const nom = params?.name;
+      const outil = OUTILS_PAR_NOM.get(nom);
+      if (!outil) {
+        return erreur(id, -32602, `outil inconnu : ${String(nom)}`);
       }
-      const { projet: _omis, ...reste } = sortieOutil;
-      return reponse(id, {
-        content: [{ type: "text", text: JSON.stringify(reste, null, 2) }],
-        isError: false,
-      });
-    } catch (e) {
-      // Un refus borné n'est pas une panne : le modèle doit le lire et corriger,
-      // pas perdre la session.
-      return reponse(id, {
-        content: [
-          {
-            type: "text",
-            text: JSON.stringify({ refus: e instanceof Error ? e.message : String(e) }, null, 2),
-          },
-        ],
-        isError: true,
-      });
+      try {
+        const sortieOutil = outil.run(projet, params?.arguments ?? {}, { disque });
+        if (sortieOutil.projet) {
+          projet = sortieOutil.projet;
+          if (disque && cheminProjet) sauvegarder(cheminProjet, projet);
+          if (surGeste) surGeste(projet);
+        }
+        const { projet: _omis, ...reste } = sortieOutil;
+        return reponse(id, {
+          content: [{ type: "text", text: JSON.stringify(reste, null, 2) }],
+          isError: false,
+        });
+      } catch (e) {
+        // Un refus borné n'est pas une panne : le modèle doit le lire et corriger,
+        // pas perdre la session.
+        return reponse(id, {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({ refus: e instanceof Error ? e.message : String(e) }, null, 2),
+            },
+          ],
+          isError: true,
+        });
+      }
     }
+
+    if (typeof method === "string" && method.startsWith("notifications/")) return null;
+
+    return erreur(id ?? null, -32601, `méthode non prise en charge : ${String(method)}`);
   }
 
-  if (typeof method === "string" && method.startsWith("notifications/")) return;
+  /** Le document courant, tel que `exporter_config` sans chemin le rendrait. */
+  const document = () => versConfig(projet);
 
-  return erreur(id ?? null, -32601, `méthode non prise en charge : ${String(method)}`);
+  return { traiter, document, projetCourant: () => projet };
 }
 
 function sauvegarder(chemin, document) {
@@ -665,8 +683,22 @@ function sauvegarder(chemin, document) {
   }
 }
 
+/* -------------------------------------------------------------------------- */
+/* le fil stdio — et rien d'autre au-dessous : importer ce fichier ne doit    */
+/* jamais ouvrir stdin ni ouvrir un port, sinon le transport HTTP se bat avec */
+/* lui dans la même fonction serveur.                                          */
+/* -------------------------------------------------------------------------- */
+
+/** `--projet chemain` -> "chemain" ; `--http` -> undefined. */
+function valeurDArgument(listeArgs, drapeau) {
+  const index = listeArgs.indexOf(drapeau);
+  return index >= 0 ? listeArgs[index + 1] : undefined;
+}
+
+const args = process.argv.slice(2);
+
 if (args.includes("--outils")) {
-  // echappatoire de debug : `node mcp/serveur.mjs --outils` liste le contrat
+  // échappatoire de debug : `node mcp/serveur.mjs --outils` liste le contrat
   process.stdout.write(
     `${JSON.stringify(
       OUTILS.map(({ run, ...d }) => d),
@@ -677,29 +709,57 @@ if (args.includes("--outils")) {
   process.exit(0);
 }
 
-let tampon = "";
-process.stdin.setEncoding("utf8");
-process.stdin.on("data", (morceau) => {
-  tampon += morceau;
-  let saut;
-  while ((saut = tampon.indexOf("\n")) >= 0) {
-    const ligne = tampon.slice(0, saut).trim();
-    tampon = tampon.slice(saut + 1);
-    if (!ligne) continue;
-    let message;
-    try {
-      message = JSON.parse(ligne);
-    } catch {
-      erreur(null, -32700, "Ligne illisible : attendu un objet JSON-RPC par ligne.");
-      continue;
+const EST_POINT_ENTREE =
+  process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+
+if (EST_POINT_ENTREE && args.includes("--http")) {
+  const { CREER_SERVEUR_NODE } = await import("./http.mjs");
+  await CREER_SERVEUR_NODE({
+    port: Number(valeurDArgument(args, "--port") ?? process.env.PORT ?? 4750),
+    secret: valeurDArgument(args, "--secret") ?? process.env.MCP_TOKEN,
+    session: CREER_SESSION({
+      disque: true,
+      cheminProjet: valeurDArgument(args, "--projet"),
+      cheminConfig: valeurDArgument(args, "--config"),
+    }),
+  });
+} else if (EST_POINT_ENTREE) {
+  const session = CREER_SESSION({
+    disque: true,
+    cheminProjet: valeurDArgument(args, "--projet"),
+    cheminConfig: valeurDArgument(args, "--config"),
+  });
+  const ecrire = (message) => {
+    process.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", ...message })}\n`);
+  };
+  let tampon = "";
+  process.stdin.setEncoding("utf8");
+  process.stdin.on("data", (morceau) => {
+    tampon += morceau;
+    let saut;
+    while ((saut = tampon.indexOf("\n")) >= 0) {
+      const ligne = tampon.slice(0, saut).trim();
+      tampon = tampon.slice(saut + 1);
+      if (!ligne) continue;
+      let message;
+      try {
+        message = JSON.parse(ligne);
+      } catch {
+        ecrire(erreur(null, -32700, "Ligne illisible : attendu un objet JSON-RPC par ligne."));
+        continue;
+      }
+      if (Array.isArray(message)) {
+        for (const un of message) {
+          const reponse = session.traiter(un);
+          if (reponse) ecrire(reponse);
+        }
+      } else {
+        const reponse = session.traiter(message);
+        if (reponse) ecrire(reponse);
+      }
     }
-    if (Array.isArray(message)) {
-      for (const un of message) traiter(un);
-    } else {
-      traiter(message);
-    }
-  }
-});
-process.stdin.on("end", () => {
-  process.exit(0);
-});
+  });
+  process.stdin.on("end", () => {
+    process.exit(0);
+  });
+}
