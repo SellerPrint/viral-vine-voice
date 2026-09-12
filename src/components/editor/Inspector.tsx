@@ -1,3 +1,4 @@
+import { HyperFramesPanel } from "./HyperFramesPanel";
 import { getFilter } from "@/lib/video/filters";
 import { SUBTITLE_PRESETS } from "@/lib/video/presets";
 import { formatClock } from "@/lib/editor/edl";
@@ -412,6 +413,7 @@ function StyleInspector() {
           onCommit={actions.endGesture}
         />
       </Section>
+      <HyperFramesPanel />
     </>
   );
 }

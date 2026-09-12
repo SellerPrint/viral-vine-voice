@@ -55,6 +55,10 @@ export type RenderResult = {
  * (Puppeteer + FFmpeg natif) : l'installer, puis brancher ici la capture
  * frame par frame de la composition.
  */
+// Le rendu serveur (@hyperframes/producer, donc Puppeteer + FFmpeg natif) se
+// branchera ici et redeviendra vraiment asynchrone : la signature ne doit pas
+// bouger pour lui, et le chemin d'aujourd'hui est deliberement synchrone.
+// eslint-disable-next-line @typescript-eslint/require-await
 export async function renderSubtitlesWithHyperFrames(
   cues: Cue[],
   options: RenderOptions = {},

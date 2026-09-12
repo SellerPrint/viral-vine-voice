@@ -192,7 +192,9 @@ function generatePresetCSS(preset: HyperFramesPreset): string {
 function generateGSAPScript(
   elements: SubtitleElement[],
   preset: HyperFramesPreset,
-  duration: number,
+  // Chaque tween porte sa propre duree ; le total ne sert qu'a la balise
+  // `data-composition-duration` de la page, pas a la timeline.
+  _duration: number,
 ): string {
   const animations: string[] = [];
 
@@ -343,17 +345,40 @@ export function generateCSSOnlyComposition(
 
   const elements = cuesToSubtitleElements(cues);
 
+  // Le cycle dure ce que dure le dernier repère, et chaque fenêtre s'exprime en
+  // pourcentage de ce cycle : la lecture tombe aux horaires RÉELS des
+  // sous-titres, et se rejoue en boucle sans une ligne de script.
+  const total = elements.length ? Math.max(...elements.map((el) => el.end)) : 1;
+  const cle = (seconde: number) => `${((seconde / total) * 100).toFixed(2)}%`;
+  const entree =
+    preset.entrance === "slide"
+      ? "translateY(14px)"
+      : preset.entrance === "pop"
+        ? "scale(0.86)"
+        : "none";
+
+  const partitions: string[] = [];
   const subtitlesHTML = elements
-    .map((el) => {
+    .map((el, index) => {
       const wordsHTML = el.words
         .map(
-          (word, i) =>
-            `<span class="subtitle-word" style="animation-delay: ${i * 0.08}s;">${escapeHtmlText(word.text)}</span>`,
+          (word) =>
+            `<span class="subtitle-word" style="animation-delay: ${word.start.toFixed(2)}s;">${escapeHtmlText(word.text)}</span>`,
         )
         .join(" ");
 
-      return `<div class="subtitle-container" style="position: absolute; bottom: 15%; left: 0; right: 0; text-align: center; pointer-events: none;">
-        <div style="display: inline-flex; gap: 12px; flex-wrap: wrap; justify-content: center;">
+      // Un fondu court aux deux bords, jamais plus tendu que la fenêtre elle-même :
+      // un repère de 0,3 s ne doit pas cligner sur un seul photogramme.
+      const marge = Math.min(0.12, (el.end - el.start) * 0.2);
+      const nom = `cue-${index}`;
+      partitions.push(`@keyframes ${nom} {
+      0%, ${cle(el.start - marge)} { opacity: 0; transform: ${entree}; }
+      ${cle(el.start)}, ${cle(el.end - marge)} { opacity: 1; transform: none; }
+      ${cle(el.end)}, 100% { opacity: 0; transform: ${entree}; }
+    }`);
+
+      return `<div class="subtitle-container" data-cue="${el.id}" style="animation-name: ${nom};">
+        <div class="subtitle-line">
           ${wordsHTML}
         </div>
       </div>`;
@@ -372,7 +397,6 @@ export function generateCSSOnlyComposition(
 <html data-composition-id="${compositionId}" data-resolution="portrait">
 <head>
   <meta charset="UTF-8">
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@700&display=swap" rel="stylesheet">
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     #stage {
@@ -382,9 +406,31 @@ export function generateCSSOnlyComposition(
       overflow: hidden;
       background: transparent;
     }
+    #stage { --cycle: ${total.toFixed(2)}s; }
+    .subtitle-container {
+      position: absolute;
+      bottom: 15%;
+      left: 0;
+      right: 0;
+      text-align: center;
+      pointer-events: none;
+      /* Peint invisible, puis montré par SA seule fenêtre : sans elle, tous les
+         repères s'empilaient au même endroit dès la deuxième seconde. */
+      opacity: 0;
+      animation-duration: var(--cycle);
+      animation-timing-function: linear;
+      animation-iteration-count: infinite;
+      animation-fill-mode: both;
+    }
+    .subtitle-line {
+      display: inline-flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
     .subtitle-word {
       display: inline-block;
-      font-family: '${preset.fontFamily}', sans-serif;
+      font-family: '${preset.fontFamily}', system-ui, sans-serif;
       font-size: ${preset.fontSize}px;
       font-weight: 700;
       color: ${preset.color};
@@ -400,6 +446,7 @@ export function generateCSSOnlyComposition(
       70% { transform: scale(1.1); }
       100% { opacity: 1; transform: scale(1); }
     }
+    ${partitions.join("\n    ")}
   </style>
 </head>
 <body>
