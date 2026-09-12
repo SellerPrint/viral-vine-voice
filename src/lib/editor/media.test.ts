@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { MAX_VIDEO_BYTES, validateVideoFile } from "./media";
+import { MAX_VIDEO_BYTES, validateVideoFile, avertissementDecodage } from "./media";
 
 /**
  * Garde-fous d'import.
@@ -12,6 +12,22 @@ import { MAX_VIDEO_BYTES, validateVideoFile } from "./media";
  */
 
 const file = (name: string, size: number, type: string) => ({ name, size, type });
+
+describe("avertissementDecodage", () => {
+  it("se tait quand l'image est décodée", () => {
+    expect(avertissementDecodage({ width: 1080, height: 1920 })).toBeNull();
+  });
+
+  it("nomme le 0×0 d'un HEVC que Chromium ne décode pas", () => {
+    const avis = avertissementDecodage({ width: 0, height: 0 });
+    expect(avis).toContain("non décodée");
+    expect(avis).toContain("H.264");
+  });
+
+  it("signale aussi la hauteur seule manquante", () => {
+    expect(avertissementDecodage({ width: 1080, height: 0 })).not.toBeNull();
+  });
+});
 
 describe("validateVideoFile", () => {
   it("accepte une vidéo avec ou sans type déclaré", () => {

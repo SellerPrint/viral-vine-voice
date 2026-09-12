@@ -4,7 +4,12 @@ import { clipsToCues, activeCue } from "@/lib/editor/cues";
 import { demoProject, EMPTY_PROJECT } from "@/lib/editor/project";
 import { formatClock } from "@/lib/editor/edl";
 import { describe } from "@/lib/errors";
-import { loadDemoSource, loadSourceFromFile, validateVideoFile } from "@/lib/editor/media";
+import {
+  avertissementDecodage,
+  loadDemoSource,
+  loadSourceFromFile,
+  validateVideoFile,
+} from "@/lib/editor/media";
 import { releaseFfmpeg } from "@/lib/video/ffmpeg-client";
 import type { SubtitlePreset } from "@/lib/video/presets";
 import {
@@ -133,6 +138,9 @@ export function useEditorActions() {
         dispatch({ type: "ui", patch: { busy: "Copie locale de la vidéo…" } });
         try {
           const source = await loadSourceFromFile(file);
+          // Un fichier dont le navigateur ne décode pas l'image se charge
+          // (durée, pistes) et rend un plan muet : le dire tout de suite.
+          const reproche = avertissementDecodage(source);
           const next: Project = {
             ...project,
             name: file.name.replace(/\.[^.]+$/, ""),
@@ -144,10 +152,10 @@ export function useEditorActions() {
             type: "ui",
             patch: {
               notice: {
-                kind: "ok",
-                text: `Plan importé — ${formatClock(source.duration)}, ${source.width}×${source.height}, ${Math.round(
-                  source.size / 1024 / 1024,
-                )} Mo.`,
+                kind: reproche ? "warn" : "ok",
+                text: `Plan importé — ${formatClock(source.duration)}, ${
+                  source.width && source.height ? `${source.width}×${source.height}` : "0×0"
+                }, ${Math.round(source.size / 1024 / 1024)} Mo.${reproche ? ` ${reproche}` : ""}`,
               },
               tab: "cuts",
             },

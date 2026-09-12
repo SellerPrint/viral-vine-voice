@@ -134,6 +134,18 @@ export async function probeVideoUrl(url: string, withFps = true): Promise<MediaP
   }
 }
 
+/**
+ * Le navigateur a lu les métadonnées mais ne décode pas l'image : `0×0`.
+ *
+ * Un HEVC de TikTok sur Chromium, par exemple : la durée est là, les pistes
+ * aussi, et pourtant l'aperçu comme l'exportation restent noirs. Le taire,
+ * c'est laisser un plan importé « réussi » qui ne rendra rien.
+ */
+export function avertissementDecodage(source: { width: number; height: number }): string | null {
+  if (source.width > 0 && source.height > 0) return null;
+  return "image non décodée par ce navigateur (0×0) : convertissez la source en H.264 (MP4) — l'aperçu et l'exportation resteraient noirs.";
+}
+
 /** File d'attente de décodage partagée : deux sondes simultanées saturent Safari. */
 let queue: Promise<unknown> = Promise.resolve();
 function serialize<T>(task: () => Promise<T>): Promise<T> {
