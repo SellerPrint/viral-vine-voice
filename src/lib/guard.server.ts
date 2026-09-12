@@ -33,6 +33,11 @@ export const RATE_LIMITS = {
   transcribe: { limit: 10, windowMs: 60 * 60 * 1000 },
   translate: { limit: 30, windowMs: 60 * 60 * 1000 },
   speech: { limit: 120, windowMs: 60 * 60 * 1000 },
+  // Le fil MCP du monteur : de la combinatoire pure, aucun appel facture, mais
+  // un point d'entree public quand meme. 120 requetes a la minute par cle lais-
+  // sent un agent composer un montage complet (une trentaine d'appels) sans
+  // qu'un script puisse tourner en boucle sur les comptes.
+  mcp: { limit: 120, windowMs: 60 * 1000 },
 } as const satisfies Record<string, RateLimitRule>;
 
 function clientKey(): string {
