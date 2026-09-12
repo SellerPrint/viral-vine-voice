@@ -40,6 +40,69 @@ Vérification rapide sans client :
 npm run mcp -- --outils   # liste le contrat des 17 outils
 ```
 
+## Le fil HTTP — le même serveur sur Vercel
+
+Une fonction serverless ne tient pas un tuyau ouvert : le fil stdio n'y a donc
+pas sa place. Le **même** dispatcheur JSON-RPC est posé derrière une route HTTP,
+`POST /api/mcp` sur le déploiement (`src/routes/api.mcp.ts` →
+`src/lib/mcp.server.ts` → `mcp/http.mjs`) — mêmes outils, mêmes bornes, mêmes
+refus, parce qu'il n'y a qu'un seul `traiter`.
+
+| ce que le fil HTTP impose                                                                                      | pourquoi                                                                                                                                          |
+| -------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `MCP_TOKEN` configuré, sinon **503**                                                                           | un atelier de montage public, servi par la facture de quelqu'un, n'a pas de sens. Le jeton se compare à temps constant.                           |
+| `Authorization: Bearer <jeton>` sur chaque POST, sinon **401**                                                 |                                                                                                                                                   |
+| 120 requêtes/minute et par clé (compteur partagé, le même que les appels IA), sinon **429** avec `Retry-After` | ce point d'entrée ne doit pas devenir une boucle gratuite                                                                                         |
+| corps ≤ 256 Ko, sinon **413**                                                                                  | un document de montage pèse quelques kilooctets                                                                                                   |
+| **aucun disque** : `exporter_config` sans `chemin`, `importer_config` avec `config`                            | sur Vercel, le système de fichiers est la temporaire d'un froid — promettre un fichier ferait croire à quelque chose que personne ne retrouverait |
+
+Deux façons de travailler :
+
+```bash
+# 1) collant : initialize rend un Mcp-Session-Id, on le renvoie à chaque appel
+curl -sX POST https://<domaine>/api/mcp \
+  -H "authorization: Bearer $MCP_TOKEN" -H 'content-type: application/json' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' -D -
+
+# 2) sans état : chaque appel porte le document, le nouveau lui revient
+curl -sX POST https://<domaine>/api/mcp \
+  -H "authorization: Bearer $MCP_TOKEN" -H 'content-type: application/json' \
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{
+         "name":"montage_energetique",
+         "arguments":{"intensite":"nerveux"},
+         "document":{"app":"viraldub","version":2,"timeline":{"clips":[],"cuts":[]}}}}'
+```
+
+En collant, une session vit **dans une instance** : après un redéploiement, ou
+simplement sur une autre région, l'identifiant ne répond plus et le fil rend
+**410** avec la conduite à tenir (« rappelle initialize, ou passe
+`params.document` ») — jamais un montage à moitié reconstitué en silence. Le
+mode sans état traverse les redéploiements : c'est celui qu'on adopte quand on
+branche un agent sur une URL.
+
+Un client qui parle HTTP se branche par une URL, pas par une commande — dans
+`claude_desktop_config.json` (avec le connecteur) ou `.cursor/mcp.json` :
+
+```json
+{
+  "mcpServers": {
+    "viraldub-monteur": {
+      "type": "http",
+      "url": "https://<domaine>/api/mcp",
+      "headers": { "Authorization": "Bearer <MCP_TOKEN>" }
+    }
+  }
+}
+```
+
+Le fil stdio de `mcp/serveur.mjs` reste la voie recommandée sur un poste : il
+connaît le dossier du projet, il y écrit le fichier, et aucune session n'est à
+reprendre après un froid.
+
+`GET /api/mcp` répond la santé du fil (nom, version, nombre d'outils, sessions
+ouvertes, `disque: false`) — c'est ce qu'on regarde après un déploiement, sans
+jeton. En local, `npm run mcp:http` ouvre le même fil sur le port 4750.
+
 ## Les outils
 
 | outil                 | à quoi il sert                                                                   |

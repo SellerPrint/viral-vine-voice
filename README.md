@@ -72,6 +72,7 @@ L'app démarre sur http://localhost:3000
 | `ELEVENLABS_API_KEY` |   ✅   | Transcription (Scribe v2) et synthèse vocale (Turbo v2.5) |
 | `LOVABLE_API_KEY`    |   ✅   | Gateway IA pour la traduction (Gemini 2.5 Flash)          |
 | `AI33_API_KEY`       |   ➖   | Optionnel — voix clonée via ai33.pro                      |
+| `MCP_TOKEN`          |   ➖   | Optionnel — ouvre le fil MCP HTTP sur `/api/mcp`          |
 
 > ⚠️ Ces clés sont utilisées **exclusivement côté serveur** dans les server functions TanStack. Elles ne sont jamais exposées au client.
 
@@ -87,6 +88,8 @@ bun run typecheck   # vérification des types
 bun run lint        # ESLint
 bun run test        # tests unitaires
 bun run check       # typecheck + lint + test
+bun run mcp         # le fil MCP pour un client local (stdio)
+bun run mcp:http    # le même fil sur HTTP, port 4750
 ```
 
 ---
@@ -171,6 +174,21 @@ avec seulement `VERCEL=1` dans le shell, `npm run build` produit
    (la CSP a déjà cassé Turnstile et `ffmpeg.wasm` par le passé) :
    `E2E_BASE_URL=https://… npx playwright test -g "en-têtes"`. Le cas est
    sauté en local parce que seul un déploiement réel applique `vercel.json`.
+
+8. **Fil MCP** : `POST /api/mcp` parle le JSON-RPC de `mcp/serveur.mjs` — le même
+   dispatcheur, pas une seconde implémentation — sans dépendance ni build. Il est
+   **fermé par défaut** : sans `MCP_TOKEN` dans les variables du projet, la route
+   répond 503 (un atelier de montage ne s'ouvre pas au monde par accident). Avec
+   le jeton, chaque appel porte `Authorization: Bearer …`, le débit est compté
+   comme pour les appels IA (120/min et par clé, `guard.server.ts`), le corps est
+   plafonné à 256 Ko, et **aucun fichier n'est écrit** : `exporter_config` rend le
+   document dans la réponse — que l'humain importe dans l'atelier, onglet Projet.
+   La route tourne sur le runtime Node (`nodejs20.x`) et non sur l'Edge :
+   `mcp/serveur.mjs` importe `node:fs` pour le fil stdio partagé. `GET /api/mcp`
+   rend la santé du fil (nom, version, nombre d'outils, `disque: false`) — le
+   contrôle à faire après un déploiement, sans jeton. Les deux modes de session
+   (collante via `Mcp-Session-Id`, ou sans état via `params.document`) sont
+   décrits dans `mcp/MCP.md`.
 
 ---
 
