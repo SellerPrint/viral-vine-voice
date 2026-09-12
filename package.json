@@ -32,7 +32,8 @@
     "check": "bun run typecheck && bun run lint && bun run test",
     "test:e2e": "playwright test",
     "check:kv": "bun run scripts/check-kv.ts",
-    "mcp": "node mcp/serveur.mjs"
+    "mcp": "node mcp/serveur.mjs",
+    "mcp:http": "node mcp/serveur.mjs --http --port 4750"
   },
   "dependencies": {
     "@ffmpeg/core": "0.12.10",
