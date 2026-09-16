@@ -115,6 +115,13 @@ const PATHS: Record<string, ReactNode> = {
     </>
   ),
   crop: <path d="M4 2.6v9.4h9.4M2.6 4H4M11 12v2.6" />,
+  expand: <path d="M3.5 6.2V3.5H6.2M9.8 3.5h2.7V6.2M12.5 9.8v2.7H9.8M6.2 12.5H3.5V9.8" />,
+  ratio: (
+    <>
+      <rect x="3.2" y="2.8" width="6.2" height="10.4" rx="0.8" />
+      <path d="M10.6 5.4h2.2v5.2h-2.2" />
+    </>
+  ),
 };
 
 export function Icon({

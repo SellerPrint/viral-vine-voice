@@ -7,6 +7,7 @@ import { remapTimeWithTransitions, transitionDurations } from "@/lib/video/trans
 import { ancreLegende, cadreCouvrant } from "@/lib/video/presets";
 import { exactArrayBuffer } from "@/lib/base64";
 
+import { mixProjectSfx } from "./sfx";
 import { projectKeeps, projectPreset } from "./project";
 import { type Range } from "./edl";
 import { QUALITY_PRESETS, type Project } from "./types";
@@ -92,6 +93,12 @@ export async function renderProjectLocally(
     const cutDurations =
       transition === "none" ? keeps.map(() => 0) : transitionDurations(keeps, transitionSeconds);
 
+    const sfxWav = mixProjectSfx(project.clips, source.duration || 0);
+    if (sfxWav) {
+      cleanup.add("voice.wav");
+      await writeFileSafe(ff, "voice.wav", sfxWav);
+    }
+
     const inputs: GraphInputs = {
       cues,
       subtitleFiles,
@@ -101,12 +108,13 @@ export async function renderProjectLocally(
       activeMasks,
       keeps,
       hasAudio: source.hasAudio && !project.removeOriginalAudio,
-      hasVoice: false,
+      hasVoice: Boolean(sfxWav),
       mirror: project.mirror,
       ambienceLevel: project.ambienceLevel,
       maskStrength: project.maskStrength,
       remap: (time) => remapTimeWithTransitions(time, keeps, cutDurations),
       filterId: project.filterId,
+      vfxId: project.vfxId,
       upscale: project.upscale,
       videoWidth: width,
       videoHeight: height,
@@ -127,7 +135,7 @@ export async function renderProjectLocally(
     onProgress?.("Encodage…", 0.45);
     const outcome = await renderWithFallback(ff, inputs, {
       inputName: "input.mp4",
-      voiceFile: null,
+      voiceFile: sfxWav ? "voice.wav" : null,
       outputName: "output.mp4",
       preset: quality.preset,
       crf: quality.crf,

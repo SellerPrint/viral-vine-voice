@@ -270,6 +270,7 @@ export async function runPipeline(
       maskStrength: opts?.maskStrength,
       remap: (t) => remapTimeWithTransitions(t, keeps, cutDurations),
       filterId: opts?.filterId,
+      vfxId: opts?.vfxId,
       upscale: opts?.upscale ?? "none",
       videoWidth,
       videoHeight,

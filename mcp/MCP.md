@@ -45,7 +45,7 @@ Deux drapeaux, facultatifs :
 Vérification rapide sans client :
 
 ```bash
-npm run mcp -- --outils   # liste le contrat des 17 outils
+npm run mcp -- --outils   # liste le contrat des 19 outils
 ```
 
 ## Le fil HTTP — le même serveur sur Vercel
@@ -156,7 +156,7 @@ jeton. En local, `npm run mcp:http` ouvre le même fil sur le port 4750.
 | `etat`                | résumé lisible : plan, durée de sortie après coupes, blocs par piste, cadres     |
 | `valider`             | la liste des problèmes — chevauchements, blocs hors plan, sortie muette          |
 | `nouveau_projet`      | feuille vierge, durée du plan comprise                                           |
-| `ajouter_bloc`        | texte incrusté (`subs`), réplique doublée (`dub`), segment visuel (`video`)      |
+| `ajouter_bloc`        | texte incrusté (`subs`), réplique doublée (`dub`), segment visuel (`video`), bruitage (`sfx` + `sfxId`) |
 | `modifier_bloc`       | décaler, allonger, raccourcir, réécrire un bloc                                  |
 | `supprimer_bloc`      | retirer un bloc                                                                  |
 | `vider_pistes`        | tout enlever d'une ou plusieurs pistes avant de recomposer                       |
@@ -165,8 +165,10 @@ jeton. En local, `npm run mcp:http` ouvre le même fil sur le port 4750.
 | `couper_au_rythme`    | garder une fenêtre autour de chaque temps, couper le reste                       |
 | `regler_cadres`       | zones de masquage en fractions d'image, ou en créer                              |
 | `regler_style`        | préréglage, corps, ancrage, capitales, longueur de ligne, couleurs               |
-| `regler_options`      | mot à mot, silences, ambiance, transition, filtre, agrandissement, force du flou |
-| `montage_energetique` | la recette : rythme + typographie + bandeau + mot à mot d'un seul coup           |
+| `catalogues`          | fiches (id, nom, description, catégorie) : filtres, VFX, texte, SFX, transitions ; `q` / `categorie` |
+| `poser_sfx`           | pose un bruitage du catalogue local sur la piste `sfx`                           |
+| `regler_options`      | mot à mot, silences, ambiance, transition, filtre, VFX, animation de texte, agrandissement |
+| `montage_energetique` | la recette : rythme + typographie + bandeau + VFX + animation de texte           |
 | `options_rendu`       | la demande de rendu en trois blocs, pour relecture avant export                  |
 | `exporter_config`     | le fichier `.json` que l'atelier importe                                         |
 | `importer_config`     | reprendre un montage déjà exporté pour le poursuivre                             |
@@ -189,14 +191,15 @@ interdit ici.
 ## Ordre qui marche
 
 1. `etat` — savoir où on met les pieds (durée du plan, ce qui est déjà posé).
-2. `vider_pistes` si le plan porte un travail précédent.
-3. Les blocs de texte et de voix, **en temps source**.
-4. `couper_au_rythme` ou `ajouter_coupe` — le rythme d'abord, la ponctuation ensuite.
-5. `regler_cadres` — les zones à masquer, puis la légence : un cadre actif qui
+2. `catalogues` — ids VFX / SFX / animations de texte / transitions, avant de les poser.
+3. `vider_pistes` si le plan porte un travail précédent.
+4. Les blocs de texte et de voix, **en temps source** ; `poser_sfx` pour un bruitage.
+5. `couper_au_rythme` ou `ajouter_coupe` — le rythme d'abord, la ponctuation ensuite.
+6. `regler_cadres` — les zones à masquer, puis la légence : un cadre actif qui
    touche le bas ou le haut du plan **aspire la légende à son centre**.
-6. `regler_style`, `regler_options`.
-7. `valider` — corriger ce qui est signalé.
-8. `exporter_config`, puis dans l'atelier : Réglages → _Importer un fichier de
+7. `regler_style`, `regler_options` (filtre, `vfx`, `textFx`, transition).
+8. `valider` — corriger ce qui est signalé.
+9. `exporter_config`, puis dans l'atelier : Réglages → _Importer un fichier de
    configuration_.
 
 ## Quatre règles que le moteur applique et qu'aucun outil ne contourne

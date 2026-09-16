@@ -67,6 +67,27 @@ export const VIDEO_FILTERS: VideoFilter[] = [
     ffmpeg: "hue=s=0,eq=contrast=1.15",
     css: "grayscale(1) contrast(1.15)",
   },
+  {
+    id: "vintage",
+    name: "Vintage",
+    description: "Look Shotcut / Kdenlive : contraste doux, un peu de sépia.",
+    ffmpeg: "eq=contrast=1.06:saturation=0.72:gamma=1.08,hue=h=8",
+    css: "sepia(0.28) contrast(1.06) saturate(0.85)",
+  },
+  {
+    id: "fade",
+    name: "Fade",
+    description: "Image délavée, façon Omniclip cinéma.",
+    ffmpeg: "eq=contrast=0.92:saturation=0.7:brightness=0.04",
+    css: "contrast(0.92) saturate(0.7) brightness(1.04)",
+  },
+  {
+    id: "punch",
+    name: "Punch",
+    description: "Contraste et saturation poussés, style CapCut Pop.",
+    ffmpeg: "eq=contrast=1.22:saturation=1.28:brightness=0.03,unsharp=5:5:0.7:5:5:0.0",
+    css: "contrast(1.22) saturate(1.28) brightness(1.03)",
+  },
 ];
 
 export const DEFAULT_FILTER_ID = "none";

@@ -24,7 +24,7 @@ test("le volet affiche l'état réel du fil", async ({ page }) => {
   const volet = page.locator("section", { hasText: "Agent de montage (MCP)" }).first();
   await expect(volet).toBeVisible();
   // le nombre d'outils vient du GET /api/mcp, pas d'une chaîne codée dans le JSX
-  await expect(volet).toContainText(/17 outils/);
+  await expect(volet).toContainText(/19 outils/);
   await expect(volet).toContainText(/fermé|jeton|ouvert/);
 });
 

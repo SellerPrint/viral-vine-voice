@@ -2,15 +2,42 @@ import { useEffect, useRef, useState } from "react";
 
 import { detectMaskZones } from "@/lib/video/detect";
 import { VIDEO_FILTERS, UPSCALE_MODES } from "@/lib/video/filters";
+import { VFX_CATEGORIES, VFX_EFFECTS } from "@/lib/video/vfx";
 import { SUBTITLE_PRESETS, TARGET_LANGUAGES, type MaskZone } from "@/lib/video/presets";
-import { TRANSITIONS } from "@/lib/video/transitions";
+import { TEXT_FX, TEXT_FX_CATEGORIES } from "@/lib/editor/text-fx";
 import { isSameLanguage, SOURCE_LANGUAGES } from "@/lib/languages";
 import { describe } from "@/lib/errors";
+import { useTurnstile } from "@/hooks/use-turnstile";
+import { translateCaptionTrack } from "@/lib/editor/translate-captions";
 import { formatClock } from "@/lib/editor/edl";
 import { renderPreviewFrame } from "@/lib/video/preview";
 import { appliquerConfiguration, configurationDuProjet } from "@/lib/editor/appliquer-config";
-import { clampZone, resolvePresetById } from "@/lib/editor/project";
+import { clampZone, makeClip, resolvePresetById } from "@/lib/editor/project";
+import { TRANSITION_CATEGORIES, TRANSITIONS } from "@/lib/video/transitions";
+import {
+  getSfx,
+  peaksOf,
+  SFX_CATEGORIES,
+  SFX_LIBRARY,
+  sfxObjectUrl,
+  synthesizeSfx,
+} from "@/lib/editor/sfx";
 import { scanSilences } from "@/lib/editor/silences";
+import {
+  applyViralTemplate,
+  matchingViralTemplate,
+  VIRAL_TEMPLATES,
+  type ViralTemplateId,
+} from "@/lib/editor/templates";
+import {
+  clipsToSubtitleCues,
+  detectSubtitleFormat,
+  mergeSubtitleCues,
+  parseSubtitles,
+  toSrt,
+  toVtt,
+} from "@/lib/editor/subtitles-io";
+import { applyCloneRecipe, CLONE_RECIPES, matchingCloneRecipe } from "@/lib/editor/clone-recipes";
 import { configFileName, MAX_CONFIG_BYTES } from "@/lib/config-io";
 import type { PanelTab } from "@/lib/editor/store";
 import type { Clip } from "@/lib/editor/types";
@@ -23,9 +50,8 @@ import { useEditor, useEditorActions } from "./editor-context";
 /**
  * Panneau gauche : la « matière » et les réglages par lot.
  *
- * Le rail vertical à une seule fonction : changer de contexte sans jamais faire
- * disparaître la timeline. C'est ce qui distingue un monteur d'un assistant en
- * étapes — ici, l'aperçu et la piste restent visibles pendant qu'on règle.
+ * Les onglets d'outils (Média, Texte, Effets…) sont horizontaux, comme dans
+ * CapCut Pro : changer de contexte ne fait jamais disparaître la timeline.
  */
 
 const RAIL: { id: PanelTab; label: string; icon: string }[] = [
@@ -36,6 +62,7 @@ const RAIL: { id: PanelTab; label: string; icon: string }[] = [
   { id: "audio", label: "Audio", icon: "music" },
   { id: "effects", label: "Effets", icon: "sparkles" },
   { id: "transitions", label: "Fondus", icon: "transition" },
+  { id: "outils", label: "Outils", icon: "layers" },
   { id: "masks", label: "Masques", icon: "mask" },
   { id: "project", label: "Projet", icon: "settings" },
 ];
@@ -45,7 +72,7 @@ export function LeftPanel() {
   const actions = useEditorActions();
 
   return (
-    <>
+    <div className="ed-left">
       <nav className="ed-rail" aria-label="Outils du monteur">
         {RAIL.map((item) => (
           <button
@@ -60,7 +87,6 @@ export function LeftPanel() {
             {item.label}
           </button>
         ))}
-        <div style={{ flex: 1 }} />
         <button
           type="button"
           className="ed-rail-btn"
@@ -72,7 +98,7 @@ export function LeftPanel() {
         </button>
       </nav>
 
-      <aside className="ed-panel">
+      <aside className="ed-panel ed-panel-wrap">
         <header className="ed-panel-head">
           <h2 className="ed-panel-title">
             {RAIL.find((item) => item.id === ui.tab)?.label ?? "Panneau"}
@@ -82,7 +108,7 @@ export function LeftPanel() {
               icon="close"
               label="Fermer le panneau"
               size={13}
-              onClick={() => dispatch({ type: "ui", patch: { tab: "media" } })}
+              onClick={() => dispatch({ type: "ui", patch: { leftPanel: false } })}
             />
           </div>
         </header>
@@ -94,18 +120,19 @@ export function LeftPanel() {
           {ui.tab === "audio" ? <AudioTab /> : null}
           {ui.tab === "effects" ? <EffectsTab /> : null}
           {ui.tab === "transitions" ? <TransitionsTab /> : null}
+          {ui.tab === "outils" ? <OutilsTab /> : null}
           {ui.tab === "masks" ? <MasksTab /> : null}
           {ui.tab === "project" ? <ProjectTab /> : null}
         </div>
       </aside>
-    </>
+    </div>
   );
 }
 
 /* ------------------------------- onglet média ------------------------------- */
 
 function MediaTab() {
-  const { project, ui, derived } = useEditor();
+  const { project, ui, derived, dispatch } = useEditor();
   const actions = useEditorActions();
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [over, setOver] = useState(false);
@@ -115,6 +142,7 @@ function MediaTab() {
     <>
       <div
         className={`ed-dropzone${over ? " is-over" : ""}`}
+        style={{ padding: "12px 10px" }}
         onDragOver={(event) => {
           event.preventDefault();
           setOver(true);
@@ -133,9 +161,13 @@ function MediaTab() {
           if (event.key === "Enter") inputRef.current?.click();
         }}
       >
-        <Icon name="upload" size={18} style={{ margin: "0 auto 6px" }} />
-        <div style={{ fontSize: 13, color: "var(--ed-text)" }}>Glisse un plan ici</div>
-        <div className="ed-note">MP4 · MOV · WEBM — 60 Mo max, tout reste dans le navigateur</div>
+        <span className="ed-drop-cta">
+          <span className="ed-drop-plus" aria-hidden="true">
+            <Icon name="plus" size={14} />
+          </span>
+          Importer
+        </span>
+        <div className="ed-note">Glisse des vidéos, photos ici — MP4 · MOV · WEBM, 60 Mo max</div>
       </div>
       <input
         ref={inputRef}
@@ -152,6 +184,35 @@ function MediaTab() {
         }}
       />
 
+      {source ? (
+        <Section title="Médiathèque">
+          <div className="ed-media-grid">
+            <button
+              type="button"
+              className="ed-media-card is-active"
+              onClick={() => dispatch({ type: "select", selection: { kind: "source" } })}
+              title={source.name}
+            >
+              <video
+                src={source.url}
+                muted
+                playsInline
+                preload="metadata"
+                onLoadedData={(event) => {
+                  const el = event.currentTarget;
+                  if (el.duration > 0.4) el.currentTime = 0.4;
+                }}
+              />
+              <span className="ed-media-duration">{formatClock(source.duration)}</span>
+              <span className="ed-media-card-meta">
+                <b>{source.name}</b>
+                {source.width}×{source.height}
+              </span>
+            </button>
+          </div>
+        </Section>
+      ) : null}
+
       <button
         type="button"
         className="ed-btn"
@@ -163,7 +224,7 @@ function MediaTab() {
       </button>
 
       {source ? (
-        <Section title="Plan source">
+        <Section title="Plan source" collapsible defaultOpen={false}>
           <div className="ed-card">
             <Kv k="Fichier" v={source.name} />
             <Kv k="Durée" v={formatClock(source.duration)} />
@@ -183,7 +244,7 @@ function MediaTab() {
           </p>
         ) : (
           <div className="flex flex-col gap-1">
-            {(["subs", "cuts", "dub"] as const).map((track) => {
+            {(["subs", "cuts", "dub", "sfx"] as const).map((track) => {
               const clips = project.clips.filter((clip) => clip.track === track);
               if (!clips.length) return null;
               return (
@@ -358,15 +419,229 @@ function CutsTab() {
   );
 }
 
+function downloadText(filename: string, body: string, mime: string) {
+  const url = URL.createObjectURL(new Blob([body], { type: mime }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+function SubtitleFiles() {
+  const { project } = useEditor();
+  const actions = useEditorActions();
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const cues = clipsToSubtitleCues(project.clips);
+
+  const importFile = async (file: File | undefined) => {
+    if (!file) return;
+    const raw = await file.text();
+    const parsed = parseSubtitles(raw);
+    if (!parsed.length) {
+      actions.notify({
+        kind: "error",
+        text: "Aucun cue lisible : un SRT ou un WebVTT avec des plages horaires est attendu.",
+      });
+      return;
+    }
+    actions.patch({ clips: mergeSubtitleCues(project.clips, parsed) });
+    actions.notify({
+      kind: "ok",
+      text: `${parsed.length} légende(s) importées (${detectSubtitleFormat(raw).toUpperCase()}). Coupes et voix off inchangées.`,
+    });
+  };
+
+  const exportFile = (kind: "srt" | "vtt") => {
+    if (!cues.length) {
+      actions.notify({ kind: "warn", text: "Aucune légende à exporter." });
+      return;
+    }
+    const stem = (project.name || "legendes").replace(/[^\w\-]+/g, "-");
+    if (kind === "srt") downloadText(`${stem}.srt`, toSrt(cues), "application/x-subrip");
+    else downloadText(`${stem}.vtt`, toVtt(cues), "text/vtt");
+    actions.notify({
+      kind: "ok",
+      text: `${cues.length} légende(s) exportées en ${kind.toUpperCase()} — lisible par OpenCut, Shotcut, Kdenlive.`,
+    });
+  };
+
+  return (
+    <Section title="Fichier SRT · VTT">
+      <div className="ed-btn-row" style={{ flexWrap: "wrap" }}>
+        <button
+          type="button"
+          className="ed-btn ed-btn--sm"
+          onClick={() => inputRef.current?.click()}
+        >
+          <Icon name="upload" size={12} />
+          Importer
+        </button>
+        <button
+          type="button"
+          className="ed-btn ed-btn--sm"
+          onClick={() => exportFile("srt")}
+          disabled={!cues.length}
+        >
+          <Icon name="download" size={12} />
+          SRT
+        </button>
+        <button
+          type="button"
+          className="ed-btn ed-btn--sm"
+          onClick={() => exportFile("vtt")}
+          disabled={!cues.length}
+        >
+          <Icon name="download" size={12} />
+          VTT
+        </button>
+        <input
+          ref={inputRef}
+          type="file"
+          accept=".srt,.vtt,text/vtt,application/x-subrip,text/plain"
+          className="sr-only"
+          style={{ position: "absolute", width: 1, height: 1, opacity: 0 }}
+          aria-label="Importer un fichier SRT ou WebVTT"
+          onChange={(event) => {
+            void importFile(event.target.files?.[0]);
+            event.target.value = "";
+          }}
+        />
+      </div>
+      <p className="ed-note" style={{ margin: 0 }}>
+        Formats ouverts d'OpenCut, Shotcut, Kdenlive, Aegisub. Les temps restent, le graphe
+        d'encodage ne bouge pas.
+      </p>
+    </Section>
+  );
+}
+
 /* ------------------------------ onglet sous-titres ------------------------------ */
 
 function SubtitlesTab() {
   const { project, derived } = useEditor();
   const actions = useEditorActions();
+  const turnstile = useTurnstile();
+  const abortRef = useRef<AbortController | null>(null);
+  const [translating, setTranslating] = useState(false);
+  const [translateError, setTranslateError] = useState<string | null>(null);
   const cues = derived.subs;
+  const sameLanguage = isSameLanguage(project.sourceLanguage.name, project.targetLanguage.name);
+
+  const translateTrack = async () => {
+    if (!cues.length || sameLanguage || translating) return;
+    setTranslateError(null);
+    setTranslating(true);
+    const controller = new AbortController();
+    abortRef.current = controller;
+    actions.setBusy("Traduction des légendes…");
+    try {
+      const result = await translateCaptionTrack({
+        clips: project.clips,
+        sourceLanguage: project.sourceLanguage.name,
+        targetLanguage: project.targetLanguage.name,
+        turnstileToken: turnstile.token,
+        signal: controller.signal,
+      });
+      actions.patch({ clips: result.clips });
+      const extra = result.untranslated
+        ? ` ${result.untranslated} bloc(s) ont gardé le texte d'origine.`
+        : "";
+      actions.notify({
+        kind: result.changed ? "ok" : "warn",
+        text: result.changed
+          ? `${result.changed} légende(s) traduites en ${project.targetLanguage.name} — les temps restent, pas de voix off.${extra}`
+          : extra.trim() || "Rien à traduire : les blocs sont déjà dans cette langue, ou vides.",
+      });
+    } catch (cause) {
+      if (controller.signal.aborted) return;
+      setTranslateError(describe(cause, "La traduction a échoué."));
+    } finally {
+      abortRef.current = null;
+      setTranslating(false);
+      actions.setBusy(null);
+      turnstile.reset?.();
+    }
+  };
 
   return (
     <>
+      <button
+        type="button"
+        className="ed-btn ed-btn--primary"
+        disabled={!project.source}
+        onClick={() => actions.openCaptions(true)}
+      >
+        <Icon name="wand" size={13} />
+        Auto sous-titres
+      </button>
+      <p className="ed-note" style={{ margin: 0 }}>
+        Un clic transcrit le plan et pose les légendes mot à mot. Le doublage IA
+        (traduction + voix) reste dans Exporter.
+      </p>
+
+      <Section title="Traduire les légendes">
+        <Chips
+          value={project.targetLanguage.code}
+          options={TARGET_LANGUAGES.map((item) => ({ id: item.code, label: item.label }))}
+          onChange={(code) => {
+            const language = TARGET_LANGUAGES.find((item) => item.code === code);
+            if (language) actions.patch({ targetLanguage: language });
+          }}
+        />
+        <button
+          type="button"
+          className="ed-btn"
+          disabled={
+            translating ||
+            cues.length === 0 ||
+            sameLanguage ||
+            (turnstile.enabled && !turnstile.ready)
+          }
+          onClick={() => void translateTrack()}
+        >
+          <Icon name="text" size={13} />
+          {translating ? "Traduction…" : "Traduire les légendes"}
+        </button>
+        <p className="ed-note" style={{ margin: 0 }}>
+          {cues.length} bloc(s) · {project.sourceLanguage.label} → {project.targetLanguage.label}.
+          Les horodatages restent. Pas de voix off.
+        </p>
+        {sameLanguage ? (
+          <Notice
+            notice={{
+              kind: "warn",
+              text: "Même langue de départ et d'arrivée : change la langue du doublage pour traduire.",
+            }}
+          />
+        ) : null}
+        {translateError ? (
+          <Notice
+            notice={{ kind: "error", text: translateError }}
+            onDismiss={() => setTranslateError(null)}
+          />
+        ) : null}
+        {turnstile.enabled ? (
+          <div>
+            <div ref={turnstile.containerRef} />
+            {turnstile.failed ? (
+              <p className="ed-note" style={{ color: "#ffb4b4" }}>
+                {turnstile.errorMessage ?? "Le widget anti-robot n'a pas pu se charger."}
+              </p>
+            ) : null}
+          </div>
+        ) : null}
+        {translating ? (
+          <button
+            type="button"
+            className="ed-btn ed-btn--sm ed-btn--danger"
+            onClick={() => abortRef.current?.abort()}
+          >
+            Annuler
+          </button>
+        ) : null}
+      </Section>
+      <SubtitleFiles />
       <Section
         title={`Blocs (${cues.length})`}
         action={
@@ -491,12 +766,33 @@ function CueRow({ clip, index, next }: { clip: Clip; index: number; next: Clip |
 /* -------------------------------- onglet style ------------------------------- */
 
 function StyleTab() {
-  const { project, derived, ui } = useEditor();
+  const { project, derived, ui, dispatch } = useEditor();
   const actions = useEditorActions();
   const preset = derived.preset;
+  const activeTemplate = matchingViralTemplate(project);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [rendering, setRendering] = useState(false);
+
+  const applyTemplate = (id: ViralTemplateId) => {
+    const result = applyViralTemplate(project, id);
+    actions.patch(result.patch);
+    const added = result.patch.clips?.find(
+      (clip) => clip.track === "subs" && !project.clips.some((item) => item.id === clip.id),
+    );
+    if (added) {
+      dispatch({ type: "select", selection: onlySelection("clip", added.id) });
+      dispatch({ type: "seek", time: added.start });
+    } else if (id === "hook") {
+      dispatch({ type: "seek", time: 0.15 });
+    } else if (id === "outro" && project.source?.duration) {
+      dispatch({ type: "seek", time: Math.max(0, project.source.duration - 2.2) });
+    }
+    actions.notify({
+      kind: /trop court|n'a pas été remplacé/.test(result.notice) ? "warn" : "ok",
+      text: result.notice,
+    });
+  };
 
   // L'image de contrôle est calculée à la demande et jetée dès qu'on quitte
   // l'onglet : c'est un `blob:` de plus dans la mémoire de l'onglet.
@@ -521,6 +817,7 @@ function StyleTab() {
         "Aperçu du style";
       const url = await renderPreviewFrame(bytes, {
         filterId: project.filterId,
+        vfxId: project.vfxId,
         upscale: project.upscale,
         videoWidth: project.source?.width,
         videoHeight: project.source?.height,
@@ -545,6 +842,40 @@ function StyleTab() {
 
   return (
     <>
+      <Section title="Formats viraux 9:16">
+        <p className="ed-note" style={{ margin: 0 }}>
+          Un clic pose le cadre — hook, punch, bandeau, outro. Ce n'est pas un style de police.
+        </p>
+        <div className="ed-grid-2">
+          {VIRAL_TEMPLATES.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              className={`ed-tpl-card${activeTemplate === item.id ? " is-active" : ""}`}
+              title={item.tagline}
+              onClick={() => applyTemplate(item.id)}
+            >
+              <span className="ed-tpl-phone" aria-hidden="true">
+                <span
+                  className="ed-tpl-bar"
+                  data-pos={item.caption}
+                  style={{ background: item.accent }}
+                />
+              </span>
+              <span className="ed-tpl-name">{item.name}</span>
+              <span className="ed-tpl-tag">{item.tagline}</span>
+            </button>
+          ))}
+        </div>
+      </Section>
+
+      <Section title="Animations de texte">
+        <p className="ed-note" style={{ margin: 0 }}>
+          Entrées CapCut sur la légende. L'aperçu les joue ; l'export FFmpeg pose le texte tel quel.
+        </p>
+        <TextFxGrid />
+      </Section>
+
       <Section title="Presets (glisse sur la timeline)">
         <div className="ed-grid-2">
           {SUBTITLE_PRESETS.map((item) => (
@@ -568,11 +899,11 @@ function StyleTab() {
                   paintOrder: "stroke fill",
                   textShadow: item.shadowColor ? "0 1px 2px rgba(0,0,0,.8)" : undefined,
                   background: item.useBox ? "rgba(0,0,0,.55)" : undefined,
-                  padding: item.useBox ? "2px 3px" : undefined,
-                  fontSize: Math.max(9, Math.min(15, item.fontsize / 7)),
+                  padding: item.useBox ? "2px 6px" : undefined,
+                  fontSize: Math.max(13, Math.min(18, item.fontsize / 6)),
                 }}
               >
-                Aa
+                Hey
               </div>
               <div style={{ fontSize: 10.5, color: "var(--ed-text-dim)", marginTop: 4 }}>
                 {item.name}
@@ -710,9 +1041,17 @@ function AudioTab() {
   const { project, derived } = useEditor();
   const actions = useEditorActions();
   const dubs = project.clips.filter((clip) => clip.track === "dub");
+  const sfxCount = project.clips.filter((clip) => clip.track === "sfx").length;
 
   return (
     <>
+      <Section title={`Bruitages CapCut (${sfxCount})`}>
+        <p className="ed-note" style={{ margin: 0 }}>
+          Clique pour poser le son sur la tête de lecture. Ils se mixent à l'export.
+        </p>
+        <SfxLibrary />
+      </Section>
+
       <Section title="Voix d'origine">
         <Switch
           label="Supprimer l'ambiance du plan"
@@ -816,9 +1155,52 @@ function AudioTab() {
 function EffectsTab() {
   const { project } = useEditor();
   const actions = useEditorActions();
+  const [vfxCat, setVfxCat] = useState("all");
+  const vfxItems =
+    vfxCat === "all" ? VFX_EFFECTS : VFX_EFFECTS.filter((item) => item.category === vfxCat);
 
   return (
     <>
+      <Section title="Effets visuels">
+        <p className="ed-note" style={{ margin: 0 }}>
+          Catalogue CapCut Pro — {VFX_EFFECTS.length - 1} VFX, empilés sur le filtre. Aperçu CSS,
+          export ffmpeg.wasm.
+        </p>
+        <Chips
+          value={vfxCat}
+          options={[
+            { id: "all", label: "Tous" },
+            ...VFX_CATEGORIES.map((item) => ({ id: item.id, label: item.label })),
+          ]}
+          onChange={setVfxCat}
+        />
+        <div className="ed-vfx-grid">
+          {vfxItems.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              className={`ed-vfx-card${project.vfxId === item.id ? " is-active" : ""}`}
+              title={item.description}
+              onClick={() => actions.patch({ vfxId: item.id })}
+            >
+              <span
+                className={`ed-vfx-sample ed-vfx-sample--${item.category}${item.motion ? ` ed-vfx-${item.motion}` : ""}`}
+                style={{ filter: item.css === "none" ? undefined : item.css }}
+              />
+              <span className="ed-vfx-name">{item.name}</span>
+            </button>
+          ))}
+        </div>
+      </Section>
+
+      <Section title="Animations de texte">
+        <TextFxGrid />
+      </Section>
+
+      <Section title="Bruitages">
+        <SfxLibrary />
+      </Section>
+
       <Section title="Filtres">
         <div className="ed-grid-2">
           {VIDEO_FILTERS.map((item) => (
@@ -882,15 +1264,42 @@ function TransitionsTab() {
   const { project, derived } = useEditor();
   const actions = useEditorActions();
   const needsCuts = derived.removed.length < 2;
+  const [cat, setCat] = useState("all");
+  const items =
+    cat === "all" ? TRANSITIONS : TRANSITIONS.filter((item) => item.category === cat);
 
   return (
     <>
       <Section title="Entre les coupes">
+        <p className="ed-note" style={{ margin: 0 }}>
+          {TRANSITIONS.length - 1} fondus xfade FFmpeg — le raccord raccourcit la sortie, les
+          légendes sont recalées.
+        </p>
         <Chips
-          value={project.transition}
-          options={TRANSITIONS.map((item) => ({ id: item.id, label: item.name }))}
-          onChange={(value) => actions.patch({ transition: value })}
+          value={cat}
+          options={[
+            { id: "all", label: "Tous" },
+            ...TRANSITION_CATEGORIES.map((item) => ({ id: item.id, label: item.label })),
+          ]}
+          onChange={setCat}
         />
+        <div className="ed-xfade-grid">
+          {items.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              className={`ed-xfade-card${project.transition === item.id ? " is-active" : ""}`}
+              title={item.description}
+              onClick={() => actions.patch({ transition: item.id })}
+            >
+              <span className={`ed-xfade-sample ed-xfade-sample--${item.category}`} aria-hidden="true">
+                <i className="a" />
+                <i className="b" />
+              </span>
+              <span className="ed-xfade-name">{item.name}</span>
+            </button>
+          ))}
+        </div>
         {project.transition !== "none" ? (
           <Slider
             label="Durée du fondu"
@@ -919,6 +1328,162 @@ function TransitionsTab() {
         sous-titres sont re-calés pour ne pas dériver. C'est le moteur qui recalcule, pas un simple
         décalage constant.
       </p>
+    </>
+  );
+}
+
+function TextFxGrid() {
+  const { project } = useEditor();
+  const actions = useEditorActions();
+  return (
+    <div className="ed-sfx-grid">
+      {TEXT_FX.map((item) => (
+        <button
+          key={item.id}
+          type="button"
+          className={`ed-sfx-card${project.textFxId === item.id ? " is-active" : ""}`}
+          title={item.description}
+          onClick={() => actions.patch({ textFxId: item.id })}
+        >
+          <b>{item.name}</b>
+          <span>{item.description}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function SfxLibrary() {
+  const { project, ui } = useEditor();
+  const actions = useEditorActions();
+  const [cat, setCat] = useState("all");
+  const items =
+    cat === "all" ? SFX_LIBRARY : SFX_LIBRARY.filter((item) => item.category === cat);
+
+  const poser = (id: string) => {
+    const def = getSfx(id);
+    const samples = synthesizeSfx(id);
+    const url = sfxObjectUrl(id);
+    const start = Math.max(0, ui.playhead);
+    const clip = makeClip(
+      "sfx",
+      { start, end: start + def.duration },
+      {
+        label: def.name,
+        sfxId: id,
+        audioUrl: url,
+        peaks: peaksOf(samples),
+      },
+    );
+    actions.patch({ clips: [...project.clips, clip] });
+    actions.notify({ kind: "ok", text: `${def.name} posé à ${formatClock(start)}.` });
+    const preview = new Audio(url);
+    void preview.play().catch(() => {});
+  };
+
+  return (
+    <>
+      <Chips
+        value={cat}
+        options={[
+          { id: "all", label: "Tous" },
+          ...SFX_CATEGORIES.map((item) => ({ id: item.id, label: item.label })),
+        ]}
+        onChange={setCat}
+      />
+      <div className="ed-sfx-grid">
+        {items.map((item) => (
+          <button
+            key={item.id}
+            type="button"
+            className="ed-sfx-card"
+            title={item.description}
+            onClick={() => poser(item.id)}
+          >
+            <b>{item.name}</b>
+            <span>{item.duration.toFixed(2)} s</span>
+          </button>
+        ))}
+      </div>
+    </>
+  );
+}
+
+/* -------------------- onglet outils OSS / clones CapCut -------------------- */
+
+function OutilsTab() {
+  const { project } = useEditor();
+  const actions = useEditorActions();
+  const active = matchingCloneRecipe(project);
+
+  return (
+    <>
+      <p className="ed-note" style={{ margin: 0 }}>
+        Outils libres déjà dans le moteur, plus des looks calqués sur les clones CapCut. Rien n'est
+        envoyé : ffmpeg.wasm, SRT et MCP restent dans le navigateur.
+      </p>
+
+      <Section title="Moteur libre">
+        <div className="ed-tool-grid">
+          <button
+            type="button"
+            className="ed-tool-card"
+            disabled={!project.source}
+            onClick={() => actions.openCaptions(true)}
+          >
+            <b>Whisper-like</b>
+            <span>Auto sous-titres — transcription locale via l'API, sans doublage.</span>
+          </button>
+          <button type="button" className="ed-tool-card" onClick={() => actions.setTab("cuts")}>
+            <b>LosslessCut</b>
+            <span>Analyse des silences et coupes sur la piste, comme le NLE OSS.</span>
+          </button>
+          <button type="button" className="ed-tool-card" onClick={() => actions.setTab("project")}>
+            <b>MCP</b>
+            <span>Pilote l'atelier depuis un agent — déjà câblé dans Projet.</span>
+          </button>
+          <button
+            type="button"
+            className="ed-tool-card"
+            disabled={!project.source}
+            onClick={() => actions.openExport(true)}
+          >
+            <b>ffmpeg.wasm</b>
+            <span>Rendu local dans le navigateur, MIT, sans compte.</span>
+          </button>
+        </div>
+      </Section>
+
+      <SubtitleFiles />
+
+      <Section title="Looks des clones CapCut">
+        <div className="ed-tool-grid">
+          {CLONE_RECIPES.map((recipe) => (
+            <button
+              key={recipe.id}
+              type="button"
+              className={`ed-tool-card${active === recipe.id ? " is-active" : ""}`}
+              title={`${recipe.origin} · ${recipe.license}`}
+              onClick={() => {
+                const result = applyCloneRecipe(project, recipe.id);
+                if (!result) return;
+                actions.patch(result.patch);
+                actions.notify({ kind: "ok", text: result.notice });
+              }}
+            >
+              <span className="ed-tool-origin">
+                {recipe.origin} · {recipe.license}
+              </span>
+              <b>{recipe.name}</b>
+              <span>{recipe.blurb}</span>
+            </button>
+          ))}
+        </div>
+        <p className="ed-note" style={{ margin: 0 }}>
+          Une recette n'écrit que filtre, style de légende et fondu. Pas de code propriétaire, pas
+          de nouveau graphe.
+        </p>
+      </Section>
     </>
   );
 }
@@ -1015,7 +1580,7 @@ function MasksTab() {
                   type="checkbox"
                   checked={zone.enabled}
                   aria-label={`Activer ${zone.label}`}
-                  style={{ accentColor: "#4f8dff", marginTop: 3 }}
+                  style={{ accentColor: "#00e5c8", marginTop: 3 }}
                   onChange={(event) => setZone(zone.id, { enabled: event.target.checked })}
                 />
                 <div style={{ flex: 1, minWidth: 0 }}>

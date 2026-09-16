@@ -361,6 +361,8 @@ export type PipelineOptions = {
   mirror?: boolean;
   /** Filtre colorimétrique (voir `filters.ts`) */
   filterId?: string;
+  /** Effet visuel CapCut (voir `vfx.ts`) */
+  vfxId?: string;
   /** Mise à l'échelle façon « 4K » */
   upscale?: UpscaleMode;
   /** Transition entre segments après coupe des silences */

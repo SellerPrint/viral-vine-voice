@@ -22,7 +22,7 @@ export const Route = createFileRoute("/")({
       { property: "og:locale", content: "fr_FR" },
       // L'atelier est une application plein écran : pas de défilement de page,
       // chaque panneau gère le sien.
-      { name: "theme-color", content: "#0e0e10" },
+      { name: "theme-color", content: "#111113" },
     ],
   }),
   component: Editor,

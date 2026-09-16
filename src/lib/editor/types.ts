@@ -22,7 +22,7 @@ import type { TransitionType } from "@/lib/video/transitions";
  * fait le moteur FFmpeg avec `trim`/`concat`.
  */
 
-export const TRACKS = ["video", "cuts", "subs", "dub"] as const;
+export const TRACKS = ["video", "cuts", "subs", "dub", "sfx"] as const;
 export type TrackId = (typeof TRACKS)[number];
 
 export type TrackMeta = {
@@ -39,12 +39,13 @@ export const TRACK_LAYOUT: TrackMeta[] = [
     id: "video",
     label: "Vidéo",
     hint: "Plan importé — les segments retirés apparaissent en creux",
-    height: 60,
+    height: 76,
     primary: true,
   },
   { id: "cuts", label: "Coupes", hint: "Plages supprimées du montage", height: 34 },
   { id: "subs", label: "Textes", hint: "Texte incrusté au rendu", height: 46 },
   { id: "dub", label: "Voix off", hint: "Doublage généré (aperçu audio)", height: 38 },
+  { id: "sfx", label: "SFX", hint: "Bruitages CapCut — whoosh, impact, clic…", height: 34 },
 ];
 
 export type Clip = {
@@ -60,9 +61,11 @@ export type Clip = {
   sourceText?: string;
   /** Locuteur (index de voix ElevenLabs). */
   speakerId?: string;
-  /** Voix off : URL de l'extrait WAV et crêtes pour la forme d'onde. */
+  /** Voix off / SFX : URL de l'extrait WAV et crêtes pour la forme d'onde. */
   audioUrl?: string;
   peaks?: number[];
+  /** SFX : identifiant de la bibliothèque synthétisée. */
+  sfxId?: string;
   /** Coupe : raison affichée dans la pastille. */
   reason?: "silence" | "manuel";
 };
@@ -116,6 +119,10 @@ export type Project = {
   /* ---------------------------------- image --------------------------------- */
   mirror: boolean;
   filterId: string;
+  /** Effet visuel CapCut (glow, glitch, shake…), empilé sur le look. */
+  vfxId: string;
+  /** Animation de légende CapCut (pop, fondu, machine à écrire…). */
+  textFxId: string;
   upscale: UpscaleMode;
   maskStrength: MaskStrength;
 
@@ -142,6 +149,8 @@ export function toRenderOptions(project: Project): RenderOptions {
     ttsProvider: project.ttsProvider,
     clonedVoiceId: project.clonedVoiceId,
     filterId: project.filterId,
+    vfxId: project.vfxId,
+    textFxId: project.textFxId,
     upscale: project.upscale,
     transition: project.transition,
     transitionDuration: project.transitionDuration,

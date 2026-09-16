@@ -33,6 +33,8 @@ const projetDeBase = (): Project => ({
   transitionDuration: 0.25,
   mirror: false,
   filterId: "none",
+  vfxId: "none",
+  textFxId: "none",
   upscale: "none",
   maskStrength: "medium",
   sourceLanguage: SOURCE_LANGUAGES[0],

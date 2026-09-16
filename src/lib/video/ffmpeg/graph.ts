@@ -1,4 +1,5 @@
 import { buildLookFilters, type UpscaleMode } from "../filters";
+import { buildVfxFilter, composeLookChain } from "../vfx";
 import {
   buildAcrossfadeChain,
   buildXfadeChain,
@@ -34,6 +35,8 @@ export type GraphInputs = {
   remap: (t: number) => number;
   /** Filtre colorimetrique facultatif. */
   filterId?: string;
+  /** Effet visuel CapCut empile sur le look. */
+  vfxId?: string;
   /** Mise a l'echelle facultative. */
   upscale?: UpscaleMode;
   videoWidth?: number;
@@ -243,11 +246,14 @@ export function buildGraph(inputs: GraphInputs, toggles: GraphToggles): string {
   // Le look s'applique avant les coupes : une seule passe sur le flux entier
   // plutot qu'une par segment.
   if (toggles.look !== false) {
-    const look = buildLookFilters(
-      inputs.filterId,
-      inputs.upscale ?? "none",
-      inputs.videoWidth ?? 0,
-      inputs.videoHeight ?? 0,
+    const look = composeLookChain(
+      buildLookFilters(
+        inputs.filterId,
+        inputs.upscale ?? "none",
+        inputs.videoWidth ?? 0,
+        inputs.videoHeight ?? 0,
+      ),
+      buildVfxFilter(inputs.vfxId, inputs.videoWidth ?? 0, inputs.videoHeight ?? 0),
     );
     if (look) {
       graph += `[${videoIn}]${look}[vlook];`;

@@ -52,6 +52,8 @@ export const EMPTY_PROJECT: Project = {
   transitionDuration: 0.3,
   mirror: false,
   filterId: "none",
+  vfxId: "none",
+  textFxId: "none",
   upscale: "none",
   maskStrength: "medium",
   sourceLanguage: DEFAULT_SOURCE_LANGUAGE,
@@ -93,6 +95,7 @@ function defaultLabel(track: TrackId, extra: Partial<Clip>): string {
   if (track === "subs") return (extra.text ?? "Sous-titre").slice(0, 28);
   if (track === "cuts") return extra.reason === "silence" ? "Silence" : "Coupe";
   if (track === "dub") return "Voix off";
+  if (track === "sfx") return extra.sfxId ? extra.sfxId : "SFX";
   return "Plan";
 }
 
@@ -206,6 +209,60 @@ export function ingestPipeline(
     warnings,
     cues: subs.length,
     cuts: cuts.length,
+  };
+}
+
+/**
+ * Pose une transcription sur la piste Texte, sans doublage.
+ *
+ * C'est le geste « Auto sous-titres » : la parole détectée devient des blocs
+ * éditables, dans la langue du plan. Les coupes et la voix off déjà là restent.
+ */
+export function ingestCaptions(
+  project: Project,
+  segments: { text: string; start: number; end: number; speakerId?: string }[],
+): PipelineIngest {
+  const duration = project.source?.duration ?? 0;
+  const warnings: string[] = [];
+
+  const subs: Clip[] = segments
+    .filter((segment) => segment.text.trim())
+    .map((segment) => {
+      const text = segment.text.trim();
+      return makeClip(
+        "subs",
+        { start: segment.start, end: Math.max(segment.end, segment.start + 0.2) },
+        { text, sourceText: text, speakerId: segment.speakerId },
+      );
+    });
+
+  const others = project.clips.filter((clip) => clip.track !== "subs");
+
+  if (subs.length === 0) {
+    warnings.push("Aucune parole détectée : rien n'a été posé sur la piste Texte.");
+  }
+
+  let trimmed = 0;
+  if (duration > 0) {
+    for (const clip of subs) {
+      if (clip.start + clip.duration > duration + 0.05) {
+        clip.duration = round3(Math.max(MIN_CUE, duration - clip.start));
+        trimmed += 1;
+      }
+    }
+    if (trimmed > 0) {
+      warnings.push(
+        `${trimmed} sous-titre(s) dépassaient la durée de la vidéo : rogné(s) à la dernière image.`,
+      );
+    }
+  }
+
+  return {
+    clips: [...others, ...subs],
+    masks: project.masks,
+    warnings,
+    cues: subs.length,
+    cuts: 0,
   };
 }
 

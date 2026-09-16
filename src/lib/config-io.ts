@@ -28,6 +28,8 @@ import { z } from "zod";
 
 import { SOURCE_LANGUAGES } from "./languages";
 import { UPSCALE_MODES, VIDEO_FILTERS } from "./video/filters";
+import { TEXT_FX } from "./editor/text-fx";
+import { VFX_EFFECTS } from "./video/vfx";
 import {
   DEFAULT_MASKS,
   SUBTITLE_PRESETS,
@@ -50,6 +52,8 @@ export const CONFIG_VERSION = 2;
 export const MAX_CONFIG_BYTES = 64 * 1024;
 
 const filterIds = VIDEO_FILTERS.map((f) => f.id);
+const vfxIds = VFX_EFFECTS.map((f) => f.id);
+const textFxIds = TEXT_FX.map((f) => f.id);
 const upscaleIds = UPSCALE_MODES.map((m) => m.id);
 const transitionIds = TRANSITIONS.map((t) => t.id);
 const presetIds = SUBTITLE_PRESETS.map((p) => p.id);
@@ -128,6 +132,8 @@ const optionsSchema = z
     mirror: z.boolean(),
     ttsProvider: z.enum(["elevenlabs", "ai33"]),
     filterId: oneOf(filterIds),
+    vfxId: oneOf(vfxIds),
+    textFxId: oneOf(textFxIds),
     upscale: oneOf(upscaleIds),
     transition: oneOf(transitionIds),
     // Une duree negative ou demesuree casserait `xfade`.
@@ -168,7 +174,7 @@ const maskSchema = z
  */
 const clipSchema = z
   .object({
-    track: oneOf(["video", "subs", "dub"] as const),
+    track: oneOf(["video", "subs", "dub", "sfx"] as const),
     // 3600 s : au-dela, une seule valeur mal placee produirait un graphe de
     // filtres demesure et un echec d'export sans message utile.
     start: z.number().finite().min(0).max(3600),
@@ -177,6 +183,7 @@ const clipSchema = z
     sourceText: z.string().max(300).optional(),
     label: z.string().max(120).optional(),
     speakerId: z.string().max(64).optional(),
+    sfxId: z.string().max(40).optional(),
   })
   .strict();
 
@@ -234,13 +241,14 @@ export type ConfigPayload = {
 
 /** Un bloc de travail tel qu'un fichier de configuration peut le decrire. */
 export type BlocConfig = {
-  track: "video" | "subs" | "dub";
+  track: "video" | "subs" | "dub" | "sfx";
   start: number;
   duration: number;
   text?: string;
   sourceText?: string;
   label?: string;
   speakerId?: string;
+  sfxId?: string;
 };
 
 /** Une coupe : une plage retiree de la timeline source. */

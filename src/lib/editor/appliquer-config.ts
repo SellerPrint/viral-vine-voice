@@ -2,6 +2,7 @@ import { applyConfig, bornerTimeline, exportConfig, parseConfig } from "@/lib/co
 import { SOURCE_LANGUAGES } from "@/lib/languages";
 import { TARGET_LANGUAGES } from "@/lib/video/presets";
 import { makeClip } from "@/lib/editor/project";
+import { getSfx, peaksOf, sfxObjectUrl, synthesizeSfx } from "@/lib/editor/sfx";
 import type { Clip, Project } from "@/lib/editor/types";
 
 /**
@@ -41,6 +42,8 @@ export function configurationDuProjet(project: Project): string {
       ttsProvider: project.ttsProvider,
       clonedVoiceId: project.clonedVoiceId,
       filterId: project.filterId,
+      vfxId: project.vfxId,
+      textFxId: project.textFxId,
       upscale: project.upscale,
       transition: project.transition,
       transitionDuration: project.transitionDuration,
@@ -69,6 +72,7 @@ export function configurationDuProjet(project: Project): string {
                 ...(clip.text ? { text: clip.text } : {}),
                 ...(clip.sourceText ? { sourceText: clip.sourceText } : {}),
                 ...(clip.speakerId ? { speakerId: clip.speakerId } : {}),
+                ...(clip.sfxId ? { sfxId: clip.sfxId } : {}),
               },
             ],
       ),
@@ -119,6 +123,8 @@ export function appliquerConfiguration(
       ttsProvider: project.ttsProvider,
       clonedVoiceId: project.clonedVoiceId,
       filterId: project.filterId,
+      vfxId: project.vfxId,
+      textFxId: project.textFxId,
       upscale: project.upscale,
       transition: project.transition,
       transitionDuration: project.transitionDuration,
@@ -148,6 +154,8 @@ export function appliquerConfiguration(
     ttsProvider: merged.options.ttsProvider,
     clonedVoiceId: merged.options.clonedVoiceId,
     filterId: merged.options.filterId,
+    vfxId: merged.options.vfxId ?? "none",
+    textFxId: merged.options.textFxId ?? "none",
     upscale: merged.options.upscale,
     transition: merged.options.transition,
     transitionDuration: merged.options.transitionDuration,

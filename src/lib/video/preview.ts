@@ -10,6 +10,7 @@
  * video entiere.
  */
 import { buildLookFilters, type UpscaleMode } from "./filters";
+import { buildVfxFilter, composeLookChain } from "./vfx";
 import { getFfmpeg, writeFileSafe } from "./ffmpeg-client";
 import { loadFont } from "./font";
 import {
@@ -42,6 +43,7 @@ export function chainePlaque(masks: MaskZone[] | undefined, preset: SubtitlePres
 
 export type PreviewOptions = {
   filterId?: string;
+  vfxId?: string;
   upscale?: UpscaleMode;
   videoWidth?: number;
   videoHeight?: number;
@@ -126,6 +128,7 @@ export async function renderPreviewFrame(
 ): Promise<string> {
   const {
     filterId,
+    vfxId,
     upscale = "none",
     videoWidth = 0,
     videoHeight = 0,
@@ -157,7 +160,10 @@ export async function renderPreviewFrame(
   try {
     const chain: string[] = [];
 
-    const look = buildLookFilters(filterId, upscale, videoWidth, videoHeight);
+    const look = composeLookChain(
+      buildLookFilters(filterId, upscale, videoWidth, videoHeight),
+      buildVfxFilter(vfxId, videoWidth, videoHeight),
+    );
     const lookChain = look || "";
     if (look) chain.push(look);
 

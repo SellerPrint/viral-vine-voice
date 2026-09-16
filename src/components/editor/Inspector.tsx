@@ -22,6 +22,16 @@ import { useEditor, useEditorActions } from "./editor-context";
  * compréhensible sans documentation.
  */
 
+function ratioLabel(width: number, height: number): string {
+  if (!width || !height) return "Original";
+  const ratio = width / height;
+  if (Math.abs(ratio - 9 / 16) < 0.08) return "9:16";
+  if (Math.abs(ratio - 16 / 9) < 0.08) return "16:9";
+  if (Math.abs(ratio - 1) < 0.08) return "1:1";
+  if (Math.abs(ratio - 4 / 5) < 0.08) return "4:5";
+  return "Original";
+}
+
 const TABS: { id: InspectorTab; label: string }[] = [
   { id: "clip", label: "Bloc" },
   { id: "style", label: "Style" },
@@ -47,7 +57,10 @@ export function Inspector() {
   const groupe = selectedIds(state.selection).length;
 
   return (
-    <aside className="ed-inspector">
+    <aside className="ed-inspector ed-inspector-wrap">
+      <header className="ed-insp-head">
+        <h2 className="ed-insp-title">Détails</h2>
+      </header>
       {/* Un rappel, pas une niche : plusieurs blocs en main se voient aussi sur
           la piste, mais c'est ici qu'on lit ce que le geste veut dire. */}
       {groupe > 1 ? (
@@ -171,15 +184,27 @@ function ClipInspector() {
       <>
         <Section title="Plan">
           {project.source ? (
-            <div className="ed-card">
+            <div className="ed-details">
               <Kv k="Nom" v={project.source.name} />
-              <Kv k="Image" v={`${project.source.width}×${project.source.height}`} />
+              <Kv k="Fichier" v={project.source.name} />
+              <Kv k="Format" v={ratioLabel(project.source.width, project.source.height)} />
+              <Kv k="Résolution" v={`${project.source.width}×${project.source.height}`} />
+              <Kv k="Cadence" v={`${Number(project.source.fps || 0).toFixed(2)} i/s`} />
               <Kv k="Durée" v={formatClock(project.source.duration)} />
               <Kv k="Filtre" v={filter.name} />
-              <Kv
-                k="Description"
-                v={<span style={{ fontWeight: 400 }}>{filter.description}</span>}
-              />
+              <div className="ed-details-foot">
+                <button
+                  type="button"
+                  className="ed-btn ed-btn--sm"
+                  onClick={() => {
+                    const field = document.querySelector<HTMLInputElement>(".ed-project-name");
+                    field?.focus();
+                    field?.select();
+                  }}
+                >
+                  Modifier
+                </button>
+              </div>
             </div>
           ) : (
             <p className="ed-note">Aucun plan : ouvre l'onglet Média pour importer une vidéo.</p>
@@ -215,7 +240,13 @@ function ClipInspector() {
         }
         action={
           <span className="ed-time-pill">
-            {clip.track === "subs" ? "T1" : clip.track === "cuts" ? "C1" : "A1"}
+            {clip.track === "subs"
+              ? "T1"
+              : clip.track === "cuts"
+                ? "C1"
+                : clip.track === "sfx"
+                  ? "S1"
+                  : "A1"}
           </span>
         }
       >
@@ -356,7 +387,7 @@ function ClipInspector() {
         </Section>
       ) : null}
 
-      {clip.track === "dub" && clip.audioUrl ? (
+      {(clip.track === "dub" || clip.track === "sfx") && clip.audioUrl ? (
         <Section title="Écoute" collapsible>
           <audio src={clip.audioUrl} controls style={{ width: "100%" }} />
         </Section>

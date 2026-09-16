@@ -5,8 +5,10 @@ import {
   buildAcrossfadeChain,
   buildXfadeChain,
   effectiveTransitionDuration,
+  getTransition,
   remapTimeWithTransitions,
   totalDuration,
+  TRANSITIONS,
   transitionDurations,
 } from "./transitions";
 
@@ -71,6 +73,20 @@ describe("remappage temporel avec transitions", () => {
     const exact = remapTimeWithTransitions(many[11].end, many, d);
     // 11 transitions x 0,3 s = 3,3 s de dérive évitée.
     expect(naive - exact).toBeCloseTo(3.3, 2);
+  });
+});
+
+describe("catalogue xfade", () => {
+  it("a un identifiant unique, et « none » n'émet pas de xfade", () => {
+    const ids = TRANSITIONS.map((item) => item.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(ids.length).toBeGreaterThan(20);
+    expect(getTransition("none").xfade).toBe("");
+    expect(getTransition("wipeleft").xfade).toBe("wipeleft");
+    expect(getTransition("inconnu").id).toBe("none");
+    expect(buildXfadeChain(["a", "b"], KEEPS, [0, 0.3], "circleclose", "vcut")).toContain(
+      "xfade=transition=circleclose",
+    );
   });
 });
 

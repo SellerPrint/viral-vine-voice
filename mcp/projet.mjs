@@ -24,6 +24,10 @@ import {
   CONFIG_VERSION,
   CORPS,
   FILTRES,
+  EFFETS_VFX,
+  ANIMATIONS_TEXTE,
+  BRUITAGES,
+  DUREES_BRUITAGE,
   FORCES_MASQUE,
   FOURNISSEURS_VOIX,
   LIGNES,
@@ -133,6 +137,8 @@ export function nouveauProjet(entrees = {}) {
       transition: "none",
       dureeTransition: 0.25,
       filtre: "none",
+      vfx: "none",
+      textFx: "none",
       upscale: "none",
       qualite: "standard",
     },
@@ -172,11 +178,31 @@ export function ajouterBloc(projet, entrees = {}) {
     ...(entrees.locuteur || entrees.speakerId
       ? { locuteur: String(entrees.locuteur ?? entrees.speakerId).slice(0, 64) }
       : {}),
+    ...(entrees.sfxId
+      ? { sfxId: dans(BRUITAGES, entrees.sfxId, "sfxId") }
+      : {}),
   };
   return {
     projet: { ...projet, blocs: [...projet.blocs, bloc].sort((a, b) => a.start - b.start) },
     bloc,
   };
+}
+
+
+export function poserSfx(projet, entrees = {}) {
+  const id = dans(BRUITAGES, entrees.id ?? entrees.sfxId, "sfx");
+  const nominale = Math.max(0.12, DUREES_BRUITAGE[id] ?? 0.4);
+  const duree =
+    entrees.duree !== undefined || entrees.duration !== undefined
+      ? nombre(entrees.duree ?? entrees.duration, "duree", { min: 0.12, max: MAX_DUREE })
+      : nominale;
+  return ajouterBloc(projet, {
+    piste: "sfx",
+    debut: entrees.debut ?? entrees.start ?? 0,
+    duree,
+    label: id,
+    sfxId: id,
+  });
 }
 
 export function modifierBloc(projet, entrees = {}) {
@@ -340,6 +366,8 @@ const ALIAS_CHAMPS = {
   maskStrength: "forceMasque",
   transitionDuration: "dureeTransition",
   filterId: "filtre",
+  vfxId: "vfx",
+  textFxId: "textFx",
   ambienceLevel: "niveauAmbiance",
   subtitleOpacity: "opaciteFond",
   sourceLanguage: "langueSource",
@@ -370,6 +398,8 @@ const CHAMPS_PAR_OUTIL = {
     "transition",
     "dureeTransition",
     "filtre",
+    "vfx",
+    "textFx",
     "upscale",
     "niveauAmbiance",
     "opaciteFond",
@@ -534,6 +564,8 @@ export function reglerOptions(projet, brut = {}) {
       max: 3,
     });
   if (entrees.filtre !== undefined) options.filtre = dans(FILTRES, entrees.filtre, "filtre");
+  if (entrees.vfx !== undefined) options.vfx = dans(EFFETS_VFX, entrees.vfx, "vfx");
+  if (entrees.textFx !== undefined) options.textFx = dans(ANIMATIONS_TEXTE, entrees.textFx, "textFx");
   if (entrees.upscale !== undefined) options.upscale = dans(UPSCALE, entrees.upscale, "upscale");
   if (entrees.niveauAmbiance !== undefined)
     options.niveauAmbiance = nombre(entrees.niveauAmbiance, "niveauAmbiance", OPACITE);
@@ -660,6 +692,8 @@ export function versConfig(projet) {
       mirror: projet.options.miroir,
       ttsProvider: projet.options.fournisseurVoix,
       filterId: projet.options.filtre,
+      vfxId: projet.options.vfx,
+      textFxId: projet.options.textFx,
       upscale: projet.options.upscale,
       transition: projet.options.transition,
       transitionDuration: clampNumber(projet.options.dureeTransition, 0.1, 3),
@@ -687,6 +721,7 @@ export function versConfig(projet) {
             text: b.texte,
             sourceText: b.locution,
             speakerId: b.locuteur,
+            sfxId: b.sfxId,
           }),
         ),
       cuts: projet.coupes.map((c) => ({ start: c.start, duration: c.duree })),
@@ -748,6 +783,8 @@ export function versDemandeRendu(projet) {
       mirror: projet.options.miroir,
       ttsProvider: projet.options.fournisseurVoix,
       filterId: projet.options.filtre,
+      vfxId: projet.options.vfx,
+      textFxId: projet.options.textFx,
       upscale: projet.options.upscale,
       transition: projet.options.transition,
       transitionDuration: projet.options.dureeTransition,
@@ -807,6 +844,7 @@ export function depuisConfig(config) {
       texte: c.text,
       locution: c.sourceText,
       locuteur: c.speakerId,
+      sfxId: c.sfxId,
     }),
   );
   projet.coupes = cuts.map((c, i) => ({
@@ -849,6 +887,8 @@ export function depuisConfig(config) {
         ? config.options.ttsProvider
         : projet.options.fournisseurVoix,
       filtre: FILTRES.includes(config.options.filterId) ? config.options.filterId : "none",
+      vfx: EFFETS_VFX.includes(config.options.vfxId) ? config.options.vfxId : "none",
+      textFx: ANIMATIONS_TEXTE.includes(config.options.textFxId) ? config.options.textFxId : "none",
       upscale: UPSCALE.includes(config.options.upscale) ? config.options.upscale : "none",
       transition: TRANSITIONS.includes(config.options.transition)
         ? config.options.transition

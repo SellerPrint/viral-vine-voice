@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { getFilter } from "@/lib/video/filters";
+import { getTextFx } from "@/lib/editor/text-fx";
+import { getVfx } from "@/lib/video/vfx";
 import { formatClock } from "@/lib/editor/edl";
 import {
   ancreLegende,
@@ -15,6 +17,7 @@ import { isSelected } from "@/lib/editor/store";
 import type { Selection } from "@/lib/editor/store";
 
 import { Icon, IconButton } from "./ui";
+import { SfxPlayback } from "./SfxPlayback";
 import { useEditor, useEditorActions } from "./editor-context";
 
 /**
@@ -76,6 +79,7 @@ export function PreviewStage() {
   const actions = useEditorActions();
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const overlayRef = useRef<HTMLDivElement | null>(null);
+  const stageRef = useRef<HTMLDivElement | null>(null);
   /**
    * Le calque qui porte la légende : c'est sa hauteur que `top: x%` adresse.
    * Le geste de la légende doit donc se mesurer sur cette boîte, et non sur
@@ -92,6 +96,11 @@ export function PreviewStage() {
   const preset = derived.preset;
   const scale = source?.width ? boxSize.width / source.width : 0;
   const filter = getFilter(project.filterId);
+  const vfx = getVfx(project.vfxId);
+  const textFx = getTextFx(project.textFxId);
+  const previewFilter = ui.compare
+    ? "none"
+    : [filter.css, vfx.css].filter((value) => value && value !== "none").join(" ") || "none";
 
   /* --------------------------- suivi de la taille --------------------------- */
   useLayoutEffect(() => {
@@ -411,18 +420,6 @@ export function PreviewStage() {
     };
   }, [drag, project.masks, dispatch, actions]);
 
-  /* ------------------------------ transport bas ----------------------------- */
-  const cueBounds = derived.cues.map((cue) => cue.start);
-  const jump = (direction: -1 | 1) => {
-    const current = ui.playhead;
-    const sorted = [...cueBounds, 0, derived.timelineDuration].sort((a, b) => a - b);
-    const next =
-      direction > 0
-        ? sorted.find((time) => time > current + 0.02)
-        : [...sorted].reverse().find((time) => time < current - 0.05);
-    dispatch({ type: "seek", time: next ?? (direction > 0 ? 0 : derived.timelineDuration) });
-  };
-
   // Fond du texte et plaque : les deux valeurs viennent des memes fonctions
   // que le graphe ffmpeg, pour que regler l'un ne deforme pas l'autre a
   // l'ecran.
@@ -468,7 +465,39 @@ export function PreviewStage() {
     : undefined;
 
   return (
-    <div className="ed-stage">
+    <div className="ed-stage" ref={stageRef}>
+      <SfxPlayback />
+      <header className="ed-player-head">
+        <span className="ed-player-title">Lecteur</span>
+        <div className="ed-btn-row">
+          <IconButton
+            icon="eye"
+            label="Afficher les sous-titres (V)"
+            active={ui.showSubs}
+            onClick={() => dispatch({ type: "ui", patch: { showSubs: !ui.showSubs } })}
+          />
+          <IconButton
+            icon="mask"
+            label="Afficher les zones de masquage"
+            active={ui.showMasks}
+            onClick={() => dispatch({ type: "ui", patch: { showMasks: !ui.showMasks } })}
+          />
+          <IconButton
+            icon="crop"
+            label="Repères de zone sûre"
+            active={showGuides}
+            onClick={() => setShowGuides((value) => !value)}
+          />
+          {ui.renderUrl ? (
+            <IconButton
+              icon="layers"
+              label={ui.compare ? "Revenir à la source" : "Comparer avec le dernier rendu"}
+              active={ui.compare}
+              onClick={() => dispatch({ type: "ui", patch: { compare: !ui.compare } })}
+            />
+          ) : null}
+        </div>
+      </header>
       <div className="ed-stage-canvas">
         {source ? (
           <div
@@ -489,7 +518,7 @@ export function PreviewStage() {
               muted={project.removeOriginalAudio}
               preload="auto"
               style={{
-                filter: ui.compare ? "none" : filter.css,
+                filter: previewFilter,
                 transform: project.mirror && !ui.compare ? "scaleX(-1)" : undefined,
                 background: "#000",
               }}
@@ -507,6 +536,19 @@ export function PreviewStage() {
                 }
               }}
             />
+            {!ui.playing ? (
+              <button
+                type="button"
+                className="ed-play-overlay"
+                aria-label="Lecture"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  actions.togglePlay();
+                }}
+              >
+                <Icon name="play" size={22} />
+              </button>
+            ) : null}
 
             <div ref={overlayRef} className="ed-overlay">
               {/* La plaque de recouvrement : meme rectangle, meme couleur,
@@ -544,7 +586,7 @@ export function PreviewStage() {
                         du cadran recouvrait les poignées du bandeau et leur
                         volait le geste — tirer le texte écrasait sa hauteur. */}
                     <span
-                      className="ed-subtitle-text"
+                      className={`ed-subtitle-text${textFx.cssClass ? ` ${textFx.cssClass}` : ""}`}
                       style={styleBoite}
                       onPointerDown={(event) => debuterLegende(event, "place")}
                       title="Légende — glisse la ligne pour la monter ou la descendre, la poignée blanche pour changer son corps"
@@ -620,92 +662,60 @@ export function PreviewStage() {
       {/* ------------------------------- transport ------------------------------ */}
       <div className="ed-transport">
         <div className="ed-btn-row" style={{ position: "absolute", left: 12 }}>
-          <IconButton
-            icon="eye"
-            label="Afficher les sous-titres (V)"
-            active={ui.showSubs}
-            onClick={() => dispatch({ type: "ui", patch: { showSubs: !ui.showSubs } })}
-          />
-          <IconButton
-            icon="mask"
-            label="Afficher les zones de masquage"
-            active={ui.showMasks}
-            onClick={() => dispatch({ type: "ui", patch: { showMasks: !ui.showMasks } })}
-          />
-          <IconButton
-            icon="crop"
-            label="Repères de zone sûre"
-            active={showGuides}
-            onClick={() => setShowGuides((value) => !value)}
-          />
-          {ui.renderUrl ? (
-            <IconButton
-              icon="layers"
-              label={ui.compare ? "Revenir à la source" : "Comparer avec le dernier rendu"}
-              active={ui.compare}
-              onClick={() => dispatch({ type: "ui", patch: { compare: !ui.compare } })}
-            />
-          ) : null}
+          <span className="ed-timecode">
+            <b>{formatClock(ui.playhead)}</b>
+            <span>
+              {" "}
+              / {formatClock(derived.timelineDuration)}
+            </span>
+          </span>
         </div>
 
         <div className="ed-btn-row">
-          <IconButton icon="prev" label="Séquence précédente" onClick={() => jump(-1)} />
-          <IconButton
-            icon={ui.playing ? "stepBack" : "prev"}
-            label="Image précédente (Alt+←)"
-            onClick={() =>
-              dispatch({
-                type: "seek",
-                time: Math.max(0, ui.playhead - 1 / Math.max(1, source?.fps ?? 30)),
-              })
-            }
-          />
           <button
             type="button"
-            className="ed-btn ed-btn--primary"
-            style={{ width: 34, justifyContent: "center", padding: 0 }}
+            className="ed-play-btn"
             onClick={actions.togglePlay}
             aria-label={ui.playing ? "Pause" : "Lecture"}
           >
-            <Icon name={ui.playing ? "pause" : "play"} size={14} />
+            <Icon name={ui.playing ? "pause" : "play"} size={18} />
           </button>
-          <IconButton
-            icon={ui.playing ? "stepFwd" : "next"}
-            label="Image suivante (Alt+→)"
-            onClick={() =>
-              dispatch({
-                type: "seek",
-                time: Math.min(
-                  derived.timelineDuration,
-                  ui.playhead + 1 / Math.max(1, source?.fps ?? 30),
-                ),
-              })
-            }
-          />
-          <IconButton icon="next" label="Séquence suivante" onClick={() => jump(1)} />
-          <span className="ed-timecode" style={{ marginLeft: 8 }}>
-            <b>{formatClock(ui.playhead)}</b> / {formatClock(derived.timelineDuration)}
-            {derived.removed.length > 0 ? (
-              <span style={{ marginLeft: 8, color: "var(--ed-text-faint)" }}>
-                sortie {formatClock(derived.outputSeconds)} · à{" "}
-                {formatClock(derived.outputPlayhead)}
-              </span>
-            ) : null}
-          </span>
         </div>
 
         <div className="ed-btn-row" style={{ position: "absolute", right: 12 }}>
-          <span className="ed-badge" title="Résolution mesurée du plan importé">
-            {source ? `${source.width}×${source.height}` : "—"}
-          </span>
-          {ui.compare ? (
-            <span
-              className="ed-badge"
-              style={{ color: "#8fd9b8", borderColor: "rgba(80,220,160,.4)" }}
-            >
-              RENDU
-            </span>
-          ) : null}
+          <button
+            type="button"
+            className="ed-player-ctrl"
+            title="Plein écran du lecteur"
+            onClick={() => {
+              const frame =
+                overlayRef.current?.closest(".ed-frame") ??
+                stageRef.current ??
+                overlayRef.current;
+              if (!frame) return;
+              if (document.fullscreenElement) void document.exitFullscreen();
+              else void frame.requestFullscreen?.();
+            }}
+          >
+            <Icon name="expand" size={13} />
+            Full
+          </button>
+          <button
+            type="button"
+            className="ed-player-ctrl"
+            title="Ratio du plan — l'export garde ce format, sans recadrage"
+            onClick={() =>
+              actions.notify({
+                kind: "info",
+                text: source
+                  ? `Ratio du plan : ${source.width}×${source.height}. L'export ne recadre pas.`
+                  : "Importe un plan pour lire son ratio.",
+              })
+            }
+          >
+            <Icon name="ratio" size={13} />
+            Ratio
+          </button>
         </div>
       </div>
     </div>
@@ -713,25 +723,7 @@ export function PreviewStage() {
 }
 
 function EmptyStage() {
-  const actions = useEditorActions();
-  return (
-    <div className="ed-empty" style={{ maxWidth: 420 }}>
-      <Icon name="film" size={26} />
-      <div style={{ fontSize: 14, color: "var(--ed-text)" }}>Aucun plan dans le projet</div>
-      <p className="ed-note" style={{ margin: 0 }}>
-        Glisse une vidéo dans le panneau de gauche, ou ouvre la démo pour essayer tout de suite le
-        montage : coupes, masques, sous-titres et rendu local.
-      </p>
-      <button
-        type="button"
-        className="ed-btn ed-btn--primary"
-        onClick={() => actions.setTab("media")}
-      >
-        <Icon name="upload" size={13} />
-        Importer une vidéo
-      </button>
-    </div>
-  );
+  return <div className="ed-empty ed-empty--player" aria-hidden="true" />;
 }
 
 /** La zone actuellement saisie dans l'inspecteur. */

@@ -6,6 +6,9 @@ import { describe, expect, it } from "vitest";
 import {
   CONFIG_VERSION,
   CORPS,
+  ANIMATIONS_TEXTE,
+  BRUITAGES,
+  EFFETS_VFX,
   FILTRES,
   FORCES_MASQUE,
   LANGUES_CIBLES,
@@ -21,6 +24,7 @@ import {
   ajouterBloc,
   couperAuRythme,
   depuisConfig,
+  poserSfx,
   modifierBloc,
   nouveauProjet,
   reglerCadre,
@@ -61,13 +65,49 @@ describe("parité des règles avec l'application", () => {
   });
 
   it("reprennent les mêmes listes que les schémas d'options", async () => {
-    const [{ TRANSITIONS: transitions }, { VIDEO_FILTERS, UPSCALE_MODES }] = await Promise.all([
+    const [
+      { TRANSITIONS: transitions },
+      { VIDEO_FILTERS, UPSCALE_MODES },
+      { VFX_EFFECTS },
+      { TEXT_FX },
+      { SFX_LIBRARY },
+    ] = await Promise.all([
       import("@/lib/video/transitions"),
       import("@/lib/video/filters"),
+      import("@/lib/video/vfx"),
+      import("@/lib/editor/text-fx"),
+      import("@/lib/editor/sfx"),
     ]);
     expect(TRANSITIONS).toEqual(transitions.map((x) => x.id));
     expect(FILTRES).toEqual(VIDEO_FILTERS.map((x) => x.id));
     expect(UPSCALE).toEqual(UPSCALE_MODES.map((x) => x.id));
+    expect(EFFETS_VFX).toEqual(VFX_EFFECTS.map((x) => x.id));
+    expect(ANIMATIONS_TEXTE).toEqual(TEXT_FX.map((x) => x.id));
+    expect(BRUITAGES).toEqual(SFX_LIBRARY.map((x) => x.id));
+    // VFX et look restent deux listes : un id VFX n'est pas un filtre.
+    expect(FILTRES).not.toEqual(EFFETS_VFX);
+
+    const {
+      FICHES_FILTRES,
+      FICHES_VFX,
+      FICHES_TEXTE,
+      FICHES_SFX,
+      FICHES_TRANSITIONS,
+      listerCatalogues,
+    } = await import("./fiches.mjs");
+    expect(FICHES_FILTRES.map((x) => x.id)).toEqual(VIDEO_FILTERS.map((x) => x.id));
+    expect(FICHES_FILTRES.map((x) => x.nom)).toEqual(VIDEO_FILTERS.map((x) => x.name));
+    expect(FICHES_VFX.map((x) => x.id)).toEqual(VFX_EFFECTS.map((x) => x.id));
+    expect(FICHES_VFX.map((x) => x.nom)).toEqual(VFX_EFFECTS.map((x) => x.name));
+    expect(FICHES_TEXTE.map((x) => x.id)).toEqual(TEXT_FX.map((x) => x.id));
+    expect(FICHES_SFX.map((x) => x.id)).toEqual(SFX_LIBRARY.map((x) => x.id));
+    expect(FICHES_SFX.map((x) => x.duree)).toEqual(SFX_LIBRARY.map((x) => x.duration));
+    expect(FICHES_TRANSITIONS.map((x) => x.id)).toEqual(transitions.map((x) => x.id));
+    const whoosh = listerCatalogues({ famille: "sfx", q: "whoosh" });
+    expect(whoosh.sfx.items.map((x) => x.id)).toEqual(
+      expect.arrayContaining(["whoosh", "whoosh-long", "whoosh-in", "whoosh-out"]),
+    );
+    expect(whoosh.sfx.retenus).toBeLessThan(whoosh.sfx.total);
 
     const { DEFAULT_RENDER_OPTIONS } = await import("@/lib/video/render-options");
     expect(FORCES_MASQUE).toContain(DEFAULT_RENDER_OPTIONS.maskStrength);
@@ -425,8 +465,10 @@ describe("le fil MCP", () => {
       expect(infos.instructions).toMatch(/valider/);
 
       const { tools } = await client.envoyer("tools/list", {});
-      expect(tools.length).toBeGreaterThanOrEqual(17);
-      expect(tools.map((t) => t.name)).toContain("montage_energetique");
+      expect(tools.length).toBeGreaterThanOrEqual(19);
+      expect(tools.map((t) => t.name)).toEqual(
+        expect.arrayContaining(["montage_energetique", "catalogues", "poser_sfx"]),
+      );
       for (const outil of tools) {
         expect(outil.description.length).toBeGreaterThan(24);
         expect(outil.inputSchema.type).toBe("object");
@@ -449,6 +491,16 @@ describe("le fil MCP", () => {
       const rythme = await client.outil("montage_energetique", { bpm: 140, intensite: "hache" });
       expect(rythme.isError).toBe(false);
       expect(rythme.donnees.etat.coupes).toBeGreaterThan(2);
+      expect(rythme.donnees.avis).toMatch(/vfx glitch/);
+
+      const cat = await client.outil("catalogues", { famille: "sfx" });
+      expect(cat.isError).toBe(false);
+      expect(cat.donnees.catalogues.sfx.items.map((x) => x.id)).toContain("whoosh");
+      const cherche = await client.outil("catalogues", { famille: "vfx", q: "glitch" });
+      expect(cherche.donnees.catalogues.vfx.items.some((x) => x.id === "glitch")).toBe(true);
+      const sfx = await client.outil("poser_sfx", { id: "impact", debut: 0.4 });
+      expect(sfx.isError).toBe(false);
+      expect(sfx.donnees.id).toMatch(/^sfx-/);
     } finally {
       client.fermer();
     }

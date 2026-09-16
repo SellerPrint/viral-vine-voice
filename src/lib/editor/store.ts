@@ -43,6 +43,7 @@ export type PanelTab =
   | "audio"
   | "effects"
   | "transitions"
+  | "outils"
   | "masks"
   | "project";
 
@@ -87,6 +88,13 @@ export type UiState = {
    * encodage sans voix en croyant lancer le doublage.
    */
   exportMode: "local" | "ia";
+  /**
+   * Feuille « Auto sous-titres » : transcription seule, sans doublage.
+   *
+   * Distincte de `exportOpen` : ce geste n'ouvre pas l'export et ne lance
+   * ni traduction ni voix off.
+   */
+  captionsOpen: boolean;
   /**
    * Densité de l'interface. Préférence de confort, pas une donnée du montage :
    * elle ne passe donc pas par l'historique et ne s'exporte pas avec le plan.
@@ -140,6 +148,7 @@ export const INITIAL_UI: UiState = {
   notice: null,
   exportOpen: false,
   exportMode: "local",
+  captionsOpen: false,
   uiScale: "confort",
   leftPanel: true,
   rightPanel: true,

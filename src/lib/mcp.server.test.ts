@@ -44,7 +44,7 @@ describe("la porte du déploiement", () => {
 
   it("laisse le controle GET passer sans jeton", async () => {
     // c'est ce qu'on regarde juste apres un deploiement, quand on n'a pas encore
-    // regle la variable : le fil est la, il annonce 17 outils et aucun disque
+    // regle la variable : le fil est la, il annonce 19 outils et aucun disque
     jeton(undefined);
     // le compteur de debit a besoin du contexte de requete de TanStack : on
     // l'injecte, comme pour les autres cas — ce qu'on verifie ici, c'est que GET
@@ -54,7 +54,7 @@ describe("la porte du déploiement", () => {
     });
     expect(reponse.status).toBe(200);
     const corps = await reponse.json();
-    expect(corps.outils).toBe(17);
+    expect(corps.outils).toBe(19);
     expect(corps.dispo.ecriture_fichier).toBe(false);
   });
 

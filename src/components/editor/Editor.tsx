@@ -21,6 +21,7 @@ import {
   useEditorKeyboard,
   type EditorApi,
 } from "./editor-context";
+import { AutoCaptionsDialog } from "./AutoCaptions";
 import { ExportDialog } from "./ExportDialog";
 import { Inspector } from "./Inspector";
 import { LeftPanel } from "./LeftPanel";
@@ -237,6 +238,7 @@ function EditorFrame() {
       <Timeline />
 
       {ui.exportOpen ? <ExportDialog /> : null}
+      {ui.captionsOpen ? <AutoCaptionsDialog /> : null}
 
       {ui.busy ? (
         <div
@@ -249,7 +251,7 @@ function EditorFrame() {
             display: "flex",
             alignItems: "center",
             gap: 8,
-            background: "#101013",
+            background: "var(--ed-surface)",
             boxShadow: "var(--ed-shadow)",
           }}
           role="status"
@@ -260,7 +262,7 @@ function EditorFrame() {
               height: 12,
               borderRadius: 99,
               border: "2px solid rgba(255,255,255,.2)",
-              borderTopColor: "#4f8dff",
+              borderTopColor: "var(--ed-select)",
               display: "inline-block",
               animation: "spin 900ms linear infinite",
             }}

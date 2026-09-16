@@ -13,7 +13,7 @@ import { buildTicks, formatClock, round3, sourceToTimeline } from "@/lib/editor/
 import { TRACK_LAYOUT, type Clip, type Project, type TrackId } from "@/lib/editor/types";
 import { isSelected } from "@/lib/editor/store";
 
-import { IconButton } from "./ui";
+import { Icon, IconButton } from "./ui";
 import { useEditor, useEditorActions } from "./editor-context";
 
 /**
@@ -307,6 +307,19 @@ export function Timeline() {
       {/* ------------------------------- outils ------------------------------- */}
       <div className="ed-tl-toolbar">
         <IconButton
+          icon="undo"
+          label="Annuler (Ctrl+Z)"
+          onClick={actions.undo}
+          disabled={!derived.canUndo}
+        />
+        <IconButton
+          icon="redo"
+          label="Rétablir (Ctrl+Maj+Z)"
+          onClick={actions.redo}
+          disabled={!derived.canRedo}
+        />
+        <span className="ed-tl-rule" />
+        <IconButton
           icon="scissors"
           label="Couper au niveau de la tête de lecture (S)"
           onClick={actions.split}
@@ -328,32 +341,12 @@ export function Timeline() {
           onClick={actions.remove}
           disabled={!state.selection}
         />
-        <span style={{ width: 1, height: 18, background: "var(--ed-line)", margin: "0 4px" }} />
         <IconButton
           icon="magnet"
           label={ui.snap ? "Aimantation activée (M)" : "Aimantation désactivée (M)"}
           active={ui.snap}
           onClick={() => dispatch({ type: "ui", patch: { snap: !ui.snap } })}
         />
-        <IconButton
-          icon="undo"
-          label="Annuler (Ctrl+Z)"
-          onClick={actions.undo}
-          disabled={!derived.canUndo}
-        />
-        <IconButton
-          icon="redo"
-          label="Rétablir (Ctrl+Maj+Z)"
-          onClick={actions.redo}
-          disabled={!derived.canRedo}
-        />
-
-        <span className="ed-timecode" style={{ marginLeft: 6 }}>
-          source <b>{formatClock(duration)}</b> · sortie <b>{formatClock(derived.outputSeconds)}</b>
-          {derived.removed.length ? (
-            <span style={{ color: "#ff9aa4" }}> · {derived.removed.length} coupe(s)</span>
-          ) : null}
-        </span>
 
         <div style={{ flex: 1 }} />
 
@@ -387,6 +380,7 @@ export function Timeline() {
               <div
                 key={track.id}
                 className={`ed-track-head${dropLane === track.id ? " is-active" : ""}`}
+                data-track={track.id}
                 style={laneVars(track.height)}
                 title={track.hint}
               >
@@ -488,7 +482,18 @@ export function Timeline() {
               onDragLeave={() => setDropLane(null)}
               onDrop={(event) => onDropStyle(event, "video")}
             >
-              {(derived.keeps.length ? derived.keeps : [{ start: 0, end: duration }]).map(
+              {!project.source ? (
+                <div className="ed-tl-empty">
+                  <Icon name="film" size={16} />
+                  Glisse un plan ici pour commencer
+                </div>
+              ) : null}
+              {(project.source
+                ? derived.keeps.length
+                  ? derived.keeps
+                  : [{ start: 0, end: duration }]
+                : []
+              ).map(
                 (piece, index) => (
                   <div
                     key={`${piece.start}-${index}`}
@@ -511,14 +516,11 @@ export function Timeline() {
                     {wave.length > 1 ? (
                       <WaveStrip wave={wave} piece={piece} duration={duration} px={px} />
                     ) : null}
-                    {index === 0 ? (
-                      <span
-                        className="ed-clip-body"
-                        style={{ position: "relative", textShadow: "0 1px 2px #000" }}
-                      >
-                        {project.source?.name ?? "aucun plan"}
-                      </span>
-                    ) : null}
+                    <span className="ed-clip-banner">
+                      {project.source?.name ?? "aucun plan"}
+                      {index === 0 ? `  ${formatClock(piece.end - piece.start)}` : ""}
+                    </span>
+                    <span className="ed-clip-foot" aria-hidden="true" />
                   </div>
                 ),
               )}
@@ -626,6 +628,33 @@ export function Timeline() {
               </Lane>
             ) : (
               <EmptyLane height={TRACK_LAYOUT[3].height} />
+            )}
+
+            {/* SFX CapCut */}
+            {!hidden.has("sfx") ? (
+              <Lane track="sfx" px={px} onPointerDownBackground={surFondDePiste}>
+                {project.clips
+                  .filter((clip) => clip.track === "sfx")
+                  .map((clip) => (
+                    <ClipBox
+                      key={clip.id}
+                      clip={clip}
+                      px={px}
+                      selected={isSelected(state.selection, "clip", clip.id)}
+                      onPointerDown={(event, mode) => beginClipDrag(event, clip, mode)}
+                      label={clip.label}
+                      peaks={clip.peaks}
+                      onDoubleClick={() => {
+                        if (clip.audioUrl) {
+                          const audio = new Audio(clip.audioUrl);
+                          void audio.play().catch(() => {});
+                        }
+                      }}
+                    />
+                  ))}
+              </Lane>
+            ) : (
+              <EmptyLane height={TRACK_LAYOUT[4].height} />
             )}
 
             {marquee ? (

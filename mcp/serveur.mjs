@@ -54,6 +54,7 @@ import {
   versConfig,
   versDemandeRendu,
   viderPistes,
+  poserSfx,
 } from "./projet.mjs";
 import {
   CADRES_PAR_DEFAUT,
@@ -62,6 +63,9 @@ import {
   LANGUES_SOURCE,
   QUALITES,
   FILTRES,
+  EFFETS_VFX,
+  ANIMATIONS_TEXTE,
+  BRUITAGES,
   FORCES_MASQUE,
   FOURNISSEURS_VOIX,
   LIGNES,
@@ -71,6 +75,7 @@ import {
   TRANSITIONS,
   UPSCALE,
 } from "./regles.mjs";
+import { listerCatalogues } from "./fiches.mjs";
 
 /**
  * Les versions de protocole que ce serveur sait tenir. Un client qui en demande
@@ -109,20 +114,26 @@ const RECETTES = {
     dureeTransition: 0.35,
     motParMot: false,
     preset: "capcut-classic",
+    vfx: "glow",
+    textFx: "fade",
   },
   nerveux: {
     gardee: 0.58,
-    transition: "fade",
+    transition: "wipeleft",
     dureeTransition: 0.18,
     motParMot: true,
     preset: "capcut-pop",
+    vfx: "zoom",
+    textFx: "pop",
   },
   hache: {
     gardee: 0.38,
-    transition: "dissolve",
+    transition: "pixelize",
     dureeTransition: 0.1,
     motParMot: true,
     preset: "capcut-highlight",
+    vfx: "glitch",
+    textFx: "glitch",
   },
 };
 
@@ -166,7 +177,7 @@ export const OUTILS = [
   {
     name: "ajouter_bloc",
     description:
-      "Pose un bloc sur une piste. `subs` = texte incrusté (le seul dont la légende dépend), `dub` = réplique doublée, `video` = segment visuel. Temps en secondes depuis le début du plan.",
+      "Pose un bloc sur une piste. `subs` = texte incrusté, `dub` = réplique doublée, `video` = segment visuel, `sfx` = bruitage (passe `sfxId` du catalogue). Temps en secondes depuis le début du plan.",
     inputSchema: objet(
       {
         piste: { type: "string", enum: PISTES, description: "Piste cible" },
@@ -176,6 +187,7 @@ export const OUTILS = [
         locution: chaine("Phrase à doubler (piste dub)", { maxLength: 300 }),
         locuteur: chaine("Identifiant de voix (piste dub)", { maxLength: 64 }),
         label: chaine("Étiquette affichée dans le plan", { maxLength: 120 }),
+        sfxId: { type: "string", enum: BRUITAGES, description: "Bruitage (piste sfx)" },
       },
       ["piste", "debut", "duree"],
     ),
@@ -362,9 +374,53 @@ export const OUTILS = [
     },
   },
   {
+    name: "catalogues",
+    description:
+      "Fiches CapCut que le moteur connaît : filtres, VFX, animations de texte, bruitages, transitions. Chaque entrée a id, nom, description, catégorie (et durée pour les SFX). Filtre avec `q` ou `categorie` avant poser_sfx / regler_options — un id hors liste est refusé.",
+    inputSchema: objet({
+      famille: {
+        type: "string",
+        enum: ["filtres", "vfx", "texte", "sfx", "transitions", "tout"],
+        description: "Quelle liste (défaut : tout)",
+      },
+      q: chaine("Recherche dans id, nom, description", { maxLength: 80 }),
+      categorie: chaine("Catégorie (whoosh, light, entree, fondu…)", { maxLength: 40 }),
+    }),
+    run: (projet, entrees) => {
+      const catalogues = listerCatalogues(entrees);
+      return {
+        projet,
+        catalogues,
+        conseil:
+          "reprends l'`id` tel quel dans poser_sfx, regler_options.vfx / textFx / transition / filtre",
+      };
+    },
+  },
+  {
+    name: "poser_sfx",
+    description:
+      "Pose un bruitage de la bibliothèque locale (whoosh, impact, riser, glitch…) sur la piste sfx. Durée nominale du sample si tu n'en donnes pas. Synthèse locale, aucun pack vendeur.",
+    inputSchema: objet(
+      {
+        id: { type: "string", enum: BRUITAGES, description: "Identifiant du bruitage" },
+        debut: nombre("Début en secondes", { minimum: 0 }),
+        duree: nombre("Durée (défaut : durée du sample)", { minimum: 0.12 }),
+      },
+      ["id", "debut"],
+    ),
+    run: (projet, entrees) => {
+      const { projet: suivant, bloc } = poserSfx(projet, entrees);
+      return {
+        projet: suivant,
+        avis: `sfx « ${bloc.sfxId} » à ${bloc.start} s (${bloc.duree} s)`,
+        id: bloc.id,
+      };
+    },
+  },
+  {
     name: "regler_options",
     description:
-      "Options de sortie : mot à mot, silence coupé, voix originale retirée, ambiance, transition, filtre, agrandissement, force du masquage, langues.",
+      "Options de sortie : mot à mot, silence coupé, voix originale retirée, ambiance, transition, filtre colorimétrique, VFX CapCut, animation de texte, agrandissement, force du masquage, langues.",
     inputSchema: objet({
       motParMot: booleen("Un mot à la fois à l'écran"),
       couperSilences: booleen("Retirer les blancs de la source"),
@@ -384,7 +440,13 @@ export const OUTILS = [
       },
       transition: { type: "string", enum: TRANSITIONS, description: "Transition entre deux plans" },
       dureeTransition: nombre("Durée de la transition", { minimum: 0.1, maximum: 3 }),
-      filtre: { type: "string", enum: FILTRES, description: "Filtre d'image" },
+      filtre: { type: "string", enum: FILTRES, description: "Filtre colorimétrique (look)" },
+      vfx: { type: "string", enum: EFFETS_VFX, description: "Effet visuel CapCut empilé sur le look" },
+      textFx: {
+        type: "string",
+        enum: ANIMATIONS_TEXTE,
+        description: "Animation de légende (aperçu atelier)",
+      },
       upscale: { type: "string", enum: UPSCALE, description: "Agrandissement" },
       qualite: { type: "string", enum: QUALITES, description: "Réglage d'encodage du moteur" },
       langueSource: {
@@ -439,6 +501,8 @@ export const OUTILS = [
         motParMot: recette.motParMot,
         transition: recette.transition,
         dureeTransition: recette.dureeTransition,
+        vfx: recette.vfx,
+        textFx: recette.textFx,
         couperSilences: true,
         forceMasque: "strong",
       });
@@ -468,7 +532,7 @@ export const OUTILS = [
       });
       return {
         projet: final,
-        avis: `${avis} · typographie ${final.style.preset}${recette.gardee < 0.7 ? " en capitales" : ""} · bandeau 70–86 % + logo bas-droite posés · transition ${recette.transition} ${recette.dureeTransition} s${recette.motParMot ? " · mot à mot" : ""}`,
+        avis: `${avis} · typographie ${final.style.preset}${recette.gardee < 0.7 ? " en capitales" : ""} · bandeau 70–86 % + logo bas-droite posés · transition ${recette.transition} ${recette.dureeTransition} s · vfx ${recette.vfx} · texte ${recette.textFx}${recette.motParMot ? " · mot à mot" : ""}`,
         etat: resumer(final),
       };
     },
@@ -618,7 +682,7 @@ export function CREER_SESSION(options = {}) {
         },
         instructions: [
           "Tu composes un plan de montage, tu ne rends rien : les nombres et le texte que tu poses décrivent un fichier que l'humain importe dans l'atelier.",
-          "Ordre qui marche : etat → (vider_pistes si besoin) → blocs de texte et de voix → couper_au_rythme ou ajouter_coupe → regler_cadres → regler_style → regler_options → valider → exporter_config.",
+          "Ordre qui marche : etat → catalogues (vfx/sfx/texte) → (vider_pistes si besoin) → blocs de texte et de voix → poser_sfx → couper_au_rythme ou ajouter_coupe → regler_cadres → regler_style → regler_options (filtre, vfx, textFx, transition) → valider → exporter_config.",
           "Trois règles que le moteur applique et que tu ne peux pas contourner : la légende se centre horizontalement (aucun ancrage de ce côté) ; un cadre actif touchant le bas ou le haut du plan aspire la légende à son centre ; une taille de cadre plaquée sur un bord ne peut pas s'en écarter.",
           "Après chaque série de gestes, appelle valider : une sortie muette ou un bloc hors du plan s'y voit, pas dans un message d'erreur d'export.",
         ].join("\n"),

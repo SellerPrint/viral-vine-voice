@@ -11,6 +11,7 @@ import {
   cutRanges,
   demoProject,
   EMPTY_PROJECT,
+  ingestCaptions,
   ingestPipeline,
   makeClip,
   projectKeeps,
@@ -137,6 +138,58 @@ describe("ingestPipeline", () => {
       duration: 0.8,
       reason: "silence",
     });
+  });
+});
+
+describe("ingestCaptions", () => {
+  it("pose la parole source sur la piste Texte, sans traduction", () => {
+    const project = { ...EMPTY_PROJECT, source, clips: [] };
+    const result = ingestCaptions(project, [
+      { text: "tu veux doubler tes vidéos", start: 0.4, end: 2.4, speakerId: "0" },
+      { text: "sans quitter ton navigateur", start: 3, end: 5.2, speakerId: "0" },
+    ]);
+    expect(result.cues).toBe(2);
+    expect(result.cuts).toBe(0);
+    expect(result.clips[0]).toMatchObject({
+      track: "subs",
+      text: "tu veux doubler tes vidéos",
+      sourceText: "tu veux doubler tes vidéos",
+      start: 0.4,
+      duration: 2,
+    });
+  });
+
+  it("remplace les sous-titres sans toucher aux coupes", () => {
+    const cut: Clip = {
+      id: "keep",
+      track: "cuts",
+      start: 1,
+      duration: 0.4,
+      label: "Coupe",
+      reason: "manuel",
+    };
+    const old: Clip = {
+      id: "old",
+      track: "subs",
+      start: 0,
+      duration: 1,
+      label: "vieux",
+      text: "vieux",
+    };
+    const project = { ...EMPTY_PROJECT, source, clips: [cut, old] };
+    const result = ingestCaptions(project, [{ text: "nouveau", start: 0, end: 1.5 }]);
+    expect(result.clips.filter((c) => c.track === "subs")).toHaveLength(1);
+    expect(result.clips.find((c) => c.track === "subs")?.text).toBe("nouveau");
+    expect(result.clips.map((c) => c.id)).toContain("keep");
+  });
+
+  it("signale le vide plutôt que de poser des blocs muets", () => {
+    const result = ingestCaptions(
+      { ...EMPTY_PROJECT, source, clips: [] },
+      [{ text: "   ", start: 0, end: 1 }],
+    );
+    expect(result.cues).toBe(0);
+    expect(result.warnings.join(" ")).toMatch(/Aucune parole/);
   });
 });
 

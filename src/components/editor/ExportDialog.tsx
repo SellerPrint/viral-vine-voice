@@ -431,6 +431,12 @@ export function ExportDialog() {
                       />
                       <Kv k="Zones floutées" v={project.masks.filter((m) => m.enabled).length} />
                       <Kv k="Filtre" v={project.filterId} />
+                      <Kv k="VFX" v={project.vfxId} />
+                      <Kv k="Texte animé" v={project.textFxId} />
+                      <Kv
+                        k="SFX"
+                        v={project.clips.filter((clip) => clip.track === "sfx").length}
+                      />
                       <Kv k="Durée de sortie" v={formatClock(derived.outputSeconds)} />
                     </div>
                     <p className="ed-note">

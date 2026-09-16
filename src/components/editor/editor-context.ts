@@ -111,6 +111,7 @@ export function useEditorActions() {
       // même si la dernière boîte lancée l'était par « Doublage IA ».
       openExport: (open = true, mode: "local" | "ia" = "local") =>
         dispatch({ type: "ui", patch: { exportOpen: open, exportMode: mode } }),
+      openCaptions: (open = true) => dispatch({ type: "ui", patch: { captionsOpen: open } }),
       zoomBy: (factor: number) =>
         dispatch({ type: "ui", patch: { zoom: clampZoom(ui.zoom * factor) } }),
       fitTimeline: () =>
@@ -267,6 +268,7 @@ export function useEditorKeyboard() {
 
       if (event.key === "Escape") {
         if (ui.exportOpen) setUi({ exportOpen: false });
+        else if (ui.captionsOpen) setUi({ captionsOpen: false });
         else dispatch({ type: "select", selection: null });
         return;
       }

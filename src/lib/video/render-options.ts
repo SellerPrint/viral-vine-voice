@@ -13,6 +13,10 @@ export type RenderOptions = {
   clonedVoiceId: string;
   /** Filtre colorimetrique applique a l'image. */
   filterId: string;
+  /** Effet visuel CapCut empile sur le look (`vfx.ts`). */
+  vfxId: string;
+  /** Animation de légende CapCut (`text-fx.ts`) — aperçu atelier. */
+  textFxId: string;
   /** Mise a l'echelle facon « 4K ». */
   upscale: UpscaleMode;
   /** Transition inseree entre deux segments apres coupe des silences. */
@@ -46,6 +50,8 @@ export const DEFAULT_RENDER_OPTIONS: RenderOptions = {
   ttsProvider: "elevenlabs",
   clonedVoiceId: "",
   filterId: "none",
+  vfxId: "none",
+  textFxId: "none",
   upscale: "none",
   // Coupe franche par defaut : c'est le comportement historique, et une
   // transition modifie la duree finale.
