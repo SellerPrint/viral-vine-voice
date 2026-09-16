@@ -4,7 +4,7 @@ import { detectMaskZones } from "@/lib/video/detect";
 import { VIDEO_FILTERS, UPSCALE_MODES } from "@/lib/video/filters";
 import { VFX_CATEGORIES, VFX_EFFECTS } from "@/lib/video/vfx";
 import { SUBTITLE_PRESETS, TARGET_LANGUAGES, type MaskZone } from "@/lib/video/presets";
-import { TEXT_FX, TEXT_FX_CATEGORIES } from "@/lib/editor/text-fx";
+import { TEXT_FX } from "@/lib/editor/text-fx";
 import { isSameLanguage, SOURCE_LANGUAGES } from "@/lib/languages";
 import { describe } from "@/lib/errors";
 import { useTurnstile } from "@/hooks/use-turnstile";
@@ -1336,17 +1336,17 @@ function TextFxGrid() {
   const { project } = useEditor();
   const actions = useEditorActions();
   return (
-    <div className="ed-sfx-grid">
+    <div className="ed-xfade-grid">
       {TEXT_FX.map((item) => (
         <button
           key={item.id}
           type="button"
-          className={`ed-sfx-card${project.textFxId === item.id ? " is-active" : ""}`}
+          className={`ed-textfx-card ed-xfade-card${project.textFxId === item.id ? " is-active" : ""}`}
           title={item.description}
           onClick={() => actions.patch({ textFxId: item.id })}
         >
-          <b>{item.name}</b>
-          <span>{item.description}</span>
+          <span className={`ed-textfx-sample${item.cssClass ? ` ${item.cssClass}` : ""}`}>Aa</span>
+          <span className="ed-xfade-name">{item.name}</span>
         </button>
       ))}
     </div>

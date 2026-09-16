@@ -468,7 +468,7 @@ export function PreviewStage() {
     <div className="ed-stage" ref={stageRef}>
       <SfxPlayback />
       <header className="ed-player-head">
-        <span className="ed-player-title">Lecteur</span>
+        <span className="ed-player-title">{source?.name ?? "Lecteur"}</span>
         <div className="ed-btn-row">
           <IconButton
             icon="eye"

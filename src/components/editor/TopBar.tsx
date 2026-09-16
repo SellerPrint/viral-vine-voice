@@ -95,15 +95,13 @@ export function TopBar() {
 
         <button
           type="button"
-          className="ed-btn"
+          className="ed-btn ed-btn--ghost"
           onClick={() => actions.openExport(true, "ia")}
           disabled={!project.source}
         >
           <Icon name="wand" size={13} />
-          Doublage IA
+          <span className="ed-btn-label">Doublage IA</span>
         </button>
-
-        <span className="ed-badge ed-badge--pro">Pro</span>
 
         <button
           type="button"
